@@ -35,7 +35,7 @@ AI-powered MCP server that spiders Confluence for project context and generates 
 
 ## Quick Install
 
-Requires [Bun](https://bun.sh) and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
+Requires [Node.js](https://nodejs.org) 18+ and an [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
 
 ### Claude Code
 
@@ -44,7 +44,7 @@ claude mcp add lazy-backlog \
   -e ATLASSIAN_SITE_URL=https://yoursite.atlassian.net \
   -e ATLASSIAN_EMAIL=you@example.com \
   -e ATLASSIAN_API_TOKEN=your-token \
-  -- bunx lazy-backlog
+  -- npx -y lazy-backlog
 ```
 
 ### Cursor / Windsurf / other MCP clients
@@ -55,8 +55,8 @@ Add to your `.mcp.json`:
 {
   "mcpServers": {
     "lazy-backlog": {
-      "command": "bunx",
-      "args": ["lazy-backlog"],
+      "command": "npx",
+      "args": ["-y", "lazy-backlog"],
       "env": {
         "ATLASSIAN_SITE_URL": "https://yoursite.atlassian.net",
         "ATLASSIAN_EMAIL": "you@example.com",
@@ -72,7 +72,8 @@ Add to your `.mcp.json`:
 ```bash
 git clone https://github.com/Ricky-Stevens/lazy-backlog.git
 cd lazy-backlog
-bun install
+npm install
+npm run build
 ```
 
 Then point your MCP client at the local path:
@@ -81,8 +82,8 @@ Then point your MCP client at the local path:
 {
   "mcpServers": {
     "lazy-backlog": {
-      "command": "bun",
-      "args": ["run", "/path/to/lazy-backlog/src/index.ts"],
+      "command": "node",
+      "args": ["/path/to/lazy-backlog/dist/index.js"],
       "env": {
         "ATLASSIAN_SITE_URL": "https://yoursite.atlassian.net",
         "ATLASSIAN_EMAIL": "you@example.com",
@@ -113,10 +114,11 @@ create-tickets with dryRun=false ...
 ## Development
 
 ```bash
-bun run start       # Start the MCP server
-bun run check       # TypeScript typecheck + Biome lint
-bun run lint:fix    # Auto-fix lint issues
-bun run format      # Format with Biome
+npm run build       # Compile TypeScript to dist/
+npm start           # Start the MCP server
+npm run check       # TypeScript typecheck + Biome lint + tests
+npm run lint:fix    # Auto-fix lint issues
+npm run format      # Format with Biome
 ```
 
 ## License

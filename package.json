@@ -2,7 +2,7 @@
   "name": "lazy-backlog",
   "version": "0.1.2",
   "description": "AI-powered Jira ticket generation grounded in Confluence knowledge. Let AI do your backlog refinement.",
-  "module": "src/index.ts",
+  "main": "dist/index.js",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -19,34 +19,35 @@
     "tickets"
   ],
   "bin": {
-    "lazy-backlog": "src/index.ts"
+    "lazy-backlog": "dist/index.js"
   },
   "files": [
-    "src",
-    "package.json",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
+    "start": "node dist/index.js",
+    "dev": "node --watch dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "format": "biome format --write src/",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage",
-    "check": "bun run typecheck && bun run lint && bun test"
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "check": "npm run typecheck && npm run lint && bun test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
-    "@types/bun": "1.3.10"
-  },
-  "peerDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "1.3.10",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.6.2",
     "mdast-util-to-string": "^4.0.0",
     "remark-parse": "^11.0.0",
     "unified": "^11.0.5",

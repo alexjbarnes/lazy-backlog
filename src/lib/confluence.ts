@@ -1,5 +1,7 @@
 import type { ProjectConfig } from "../config/schema.js";
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 // ── Confluence API response types ──────────────────────────────────────────
 
 interface ApiPage {
@@ -205,12 +207,12 @@ export class ConfluenceClient {
     if (response.status === 429) {
       const retryAfter = response.headers.get("Retry-After");
       const waitMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : INITIAL_BACKOFF_MS * (1 << attempt);
-      await Bun.sleep(waitMs);
+      await sleep(waitMs);
       return { retry: true };
     }
 
     if (response.status >= 500) {
-      await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
+      await sleep(INITIAL_BACKOFF_MS * (1 << attempt));
       return { retry: true, error: new Error(`Confluence API ${response.status}`) };
     }
 
@@ -237,7 +239,7 @@ export class ConfluenceClient {
     }
 
     if (attempt < MAX_RETRIES - 1) {
-      await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
+      await sleep(INITIAL_BACKOFF_MS * (1 << attempt));
     }
 
     return { retry: true, error };

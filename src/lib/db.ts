@@ -1,7 +1,7 @@
-import { Database, type Statement } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import type { PageType } from "../config/schema.js";
+import { Database, type SqliteDatabase, type Statement } from "./sqlite.js";
 
 // ── Domain types ───────────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ function ftsQuery<T>(
 // ── Knowledge base ─────────────────────────────────────────────────────────
 
 export class KnowledgeBase {
-  private readonly db: Database;
+  private readonly db: SqliteDatabase;
   private readonly stmts!: ReturnType<typeof this.prepareStatements>;
   // Pre-prepared search variants (avoids dynamic SQL)
   private readonly searchStmts!: ReturnType<typeof this.prepareSearchVariants>;
@@ -133,16 +133,16 @@ export class KnowledgeBase {
   }
 
   private configurePragmas() {
-    this.db.run("PRAGMA journal_mode = WAL");
-    this.db.run("PRAGMA synchronous = NORMAL"); // Safe with WAL, 2x faster than FULL
-    this.db.run("PRAGMA foreign_keys = ON");
-    this.db.run("PRAGMA cache_size = -64000"); // 64MB cache for bulk indexing
-    this.db.run("PRAGMA mmap_size = 268435456"); // 256MB memory-mapped I/O
-    this.db.run("PRAGMA temp_store = MEMORY");
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL"); // Safe with WAL, 2x faster than FULL
+    this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA cache_size = -64000"); // 64MB cache for bulk indexing
+    this.db.exec("PRAGMA mmap_size = 268435456"); // 256MB memory-mapped I/O
+    this.db.exec("PRAGMA temp_store = MEMORY");
   }
 
   private initSchema() {
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS pages (
         id TEXT PRIMARY KEY,
         space_key TEXT NOT NULL,
@@ -159,13 +159,13 @@ export class KnowledgeBase {
       ) STRICT
     `);
 
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_key)");
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_pages_type ON pages(page_type)");
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_pages_space_type ON pages(space_key, page_type)");
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_pages_updated ON pages(updated_at)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_key)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_pages_type ON pages(page_type)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_pages_space_type ON pages(space_key, page_type)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_pages_updated ON pages(updated_at)");
 
     // ── Chunks table: section-level content with heading breadcrumbs ──
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
@@ -177,9 +177,9 @@ export class KnowledgeBase {
       ) STRICT
     `);
 
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_chunks_page ON chunks(page_id)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_chunks_page ON chunks(page_id)");
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS config (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -187,7 +187,7 @@ export class KnowledgeBase {
     `);
 
     // ── FTS5 on pages (kept for backward compat) ──
-    this.db.run(`
+    this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
         title,
         content,
@@ -197,21 +197,21 @@ export class KnowledgeBase {
       )
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
         INSERT INTO pages_fts(rowid, title, content, labels)
         VALUES (new.rowid, new.title, new.content, new.labels);
       END
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
         INSERT INTO pages_fts(pages_fts, rowid, title, content, labels)
         VALUES ('delete', old.rowid, old.title, old.content, old.labels);
       END
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE ON pages BEGIN
         INSERT INTO pages_fts(pages_fts, rowid, title, content, labels)
         VALUES ('delete', old.rowid, old.title, old.content, old.labels);
@@ -221,7 +221,7 @@ export class KnowledgeBase {
     `);
 
     // ── FTS5 on chunks (primary search target) ──
-    this.db.run(`
+    this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
         heading,
         breadcrumb,
@@ -231,21 +231,21 @@ export class KnowledgeBase {
       )
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
         INSERT INTO chunks_fts(rowid, heading, breadcrumb, content)
         VALUES (new.id, new.heading, new.breadcrumb, new.content);
       END
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
         INSERT INTO chunks_fts(chunks_fts, rowid, heading, breadcrumb, content)
         VALUES ('delete', old.id, old.heading, old.breadcrumb, old.content);
       END
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
         INSERT INTO chunks_fts(chunks_fts, rowid, heading, breadcrumb, content)
         VALUES ('delete', old.id, old.heading, old.breadcrumb, old.content);
@@ -463,13 +463,13 @@ export class KnowledgeBase {
 
   rebuildFts(): void {
     this.db.transaction(() => {
-      this.db.run("DELETE FROM pages_fts");
-      this.db.run(`
+      this.db.exec("DELETE FROM pages_fts");
+      this.db.exec(`
         INSERT INTO pages_fts(rowid, title, content, labels)
         SELECT rowid, title, content, labels FROM pages
       `);
-      this.db.run("DELETE FROM chunks_fts");
-      this.db.run(`
+      this.db.exec("DELETE FROM chunks_fts");
+      this.db.exec(`
         INSERT INTO chunks_fts(rowid, heading, breadcrumb, content)
         SELECT id, heading, breadcrumb, content FROM chunks
       `);
@@ -478,7 +478,7 @@ export class KnowledgeBase {
 
   /** Optimize and close the database connection. Call on shutdown. */
   close(): void {
-    this.db.run("PRAGMA optimize");
+    this.db.exec("PRAGMA optimize");
     this.db.close();
   }
 }

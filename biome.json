@@ -35,7 +35,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/lib/jira.ts"],
+      "includes": ["src/lib/jira.ts", "src/lib/sqlite.ts"],
       "linter": {
         "rules": {
           "suspicious": {
