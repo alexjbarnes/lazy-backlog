@@ -71,7 +71,7 @@ export function registerContextTools(server: McpServer, getKb: () => KnowledgeBa
 
       const body =
         page.content.length > MAX_PAGE_CHARS
-          ? page.content.slice(0, MAX_PAGE_CHARS) + `\n\n…[truncated — ${page.content.length} chars total]`
+          ? `${page.content.slice(0, MAX_PAGE_CHARS)}\n\n…[truncated — ${page.content.length} chars total]`
           : page.content;
 
       return textResponse(
@@ -175,7 +175,8 @@ export function appendSection(
       emit(`…and ${pages.length - i} more\n\n`);
       break;
     }
-    const p = items[i]!;
+    const p = items[i];
+    if (!p) continue;
     const entry = `### ${p.title}\n${p.content_preview.trim()}\n\n`;
     emit(entry);
     budget -= entry.length;

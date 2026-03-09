@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database, type Statement } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import type { PageType } from "../config/schema.js";
@@ -75,7 +75,7 @@ export interface SearchFilter {
 
 /** Pick the correct pre-prepared statement variant and bind params. */
 function runFilteredQuery<T>(
-  stmts: { none: any; type: any; space: any; both: any },
+  stmts: { none: Statement; type: Statement; space: Statement; both: Statement },
   query: string,
   filter: SearchFilter,
   defaultLimit: number,
@@ -98,7 +98,7 @@ function ftsQuery<T>(
   query: string,
   filter: SearchFilter,
   defaultLimit: number,
-  stmts: { none: any; type: any; space: any; both: any },
+  stmts: { none: Statement; type: Statement; space: Statement; both: Statement },
 ): T[] {
   try {
     return runFilteredQuery<T>(stmts, query, filter, defaultLimit);

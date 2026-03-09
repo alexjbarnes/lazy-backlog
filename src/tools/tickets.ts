@@ -678,9 +678,7 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
           params.comment && "Comment: added",
         ].filter(Boolean);
         const changesList = changes.map((c) => `- ${c}`).join("\n");
-        return textResponse(
-          `Updated **${params.issueKey}** — ${url}\n\nChanges:\n${changesList}`,
-        );
+        return textResponse(`Updated **${params.issueKey}** — ${url}\n\nChanges:\n${changesList}`);
       } catch (err) {
         return errorResponse(
           `Failed to update ${params.issueKey}: ${err instanceof Error ? err.message : String(err)}`,

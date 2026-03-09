@@ -115,7 +115,8 @@ export class Spider {
     options: SpiderOptions,
     onProgress?: (progress: SpiderProgress) => void,
   ): Promise<SpiderResult> {
-    const spaceKey = options.spaceKey!;
+    const spaceKey = options.spaceKey ?? "";
+    if (!spaceKey) throw new Error("spaceKey is required");
     const space = await this.client.getSpace(spaceKey);
     if (!space) throw new Error(`Space '${spaceKey}' not found`);
 
@@ -248,11 +249,11 @@ export class Spider {
     if (!page.body || page.body.trim().length === 0) return false;
 
     if (options.includeLabels && options.includeLabels.length > 0) {
-      if (!page.labels.some((l) => options.includeLabels!.includes(l))) return false;
+      if (!page.labels.some((l) => options.includeLabels?.includes(l))) return false;
     }
 
     if (options.excludeLabels && options.excludeLabels.length > 0) {
-      if (page.labels.some((l) => options.excludeLabels!.includes(l))) return false;
+      if (page.labels.some((l) => options.excludeLabels?.includes(l))) return false;
     }
 
     return true;

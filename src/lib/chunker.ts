@@ -138,11 +138,8 @@ function splitAtParagraphs(text: string, maxSize: number): string[] {
 }
 
 /** Update heading stack by popping entries at same or deeper level, then pushing the new heading. */
-function updateHeadingStack(
-  stack: { heading: string; depth: number }[],
-  section: RawSection,
-): void {
-  while (stack.length > 0 && stack.at(-1)!.depth >= section.depth) {
+function updateHeadingStack(stack: { heading: string; depth: number }[], section: RawSection): void {
+  while (stack.length > 0 && (stack.at(-1)?.depth ?? 0) >= section.depth) {
     stack.pop();
   }
   if (section.heading) {
@@ -151,14 +148,10 @@ function updateHeadingStack(
 }
 
 /** Try to merge a tiny section into the previous chunk. Returns true if merged. */
-function tryMergeTinySection(
-  text: string,
-  section: RawSection,
-  chunks: Chunk[],
-  minChunkSize: number,
-): boolean {
+function tryMergeTinySection(text: string, section: RawSection, chunks: Chunk[], minChunkSize: number): boolean {
   if (text.length < minChunkSize && text.length > 0 && chunks.length > 0) {
-    const prev = chunks.at(-1)!;
+    const prev = chunks.at(-1);
+    if (!prev) return false;
     prev.content += `\n\n## ${section.heading}\n${text}`;
     return true;
   }
@@ -175,7 +168,9 @@ function emitSectionChunks(
   overlapChars: number,
 ): void {
   for (let i = 0; i < textParts.length; i++) {
-    let content = textParts[i]!;
+    const part = textParts[i];
+    if (!part) continue;
+    let content = part;
 
     if (overlapChars > 0 && prevChunkEnd && chunks.length > 0) {
       const overlap = prevChunkEnd.slice(-overlapChars);

@@ -128,16 +128,16 @@ function parseHeading(line: string): AdfNode | null {
   const headingRe = /^(#{1,6})\s+(.+)/;
   const hm = headingRe.exec(line);
   if (!hm) return null;
-  return { type: "heading", attrs: { level: hm[1]!.length }, content: parseInline(hm[2]!) };
+  return { type: "heading", attrs: { level: hm[1]?.length ?? 1 }, content: parseInline(hm[2] ?? "") };
 }
 
 /** Parse a fenced code block starting at index `i`. Returns the node and the new index. */
 function parseCodeBlock(lines: string[], i: number): { node: AdfNode; next: number } {
-  const lang = lines[i]!.slice(3).trim() || undefined;
+  const lang = lines[i]?.slice(3).trim() || undefined;
   const codeLines: string[] = [];
   i++;
-  while (i < lines.length && !lines[i]!.startsWith("```")) {
-    codeLines.push(lines[i]!);
+  while (i < lines.length && !lines[i]?.startsWith("```")) {
+    codeLines.push(lines[i] ?? "");
     i++;
   }
   i++;
@@ -150,10 +150,15 @@ function parseCodeBlock(lines: string[], i: number): { node: AdfNode; next: numb
 }
 
 /** Collect consecutive list items matching `pattern` and return a list node. */
-function parseList(lines: string[], i: number, pattern: RegExp, listType: "bulletList" | "orderedList"): { node: AdfNode; next: number } {
+function parseList(
+  lines: string[],
+  i: number,
+  pattern: RegExp,
+  listType: "bulletList" | "orderedList",
+): { node: AdfNode; next: number } {
   const items: AdfNode[] = [];
-  while (i < lines.length && pattern.test(lines[i]!)) {
-    items.push({ type: "listItem", content: [paragraph(lines[i]!.replace(pattern, ""))] });
+  while (i < lines.length && pattern.test(lines[i] ?? "")) {
+    items.push({ type: "listItem", content: [paragraph((lines[i] ?? "").replace(pattern, ""))] });
     i++;
   }
   return { node: { type: listType, content: items }, next: i };
@@ -166,7 +171,7 @@ export function markdownToAdf(md: string): AdfNode {
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i]!;
+    const line = lines[i] ?? "";
 
     // Headings
     const heading = parseHeading(line);
@@ -228,9 +233,9 @@ function adfToText(node: Record<string, unknown>): string {
   if (node.type === "hardBreak") return "\n";
   if (Array.isArray(node.content)) {
     const inner = node.content.map((n: Record<string, unknown>) => adfToText(n)).join("");
-    if (node.type === "paragraph" || node.type === "heading") return inner + "\n";
-    if (node.type === "listItem") return "- " + inner + "\n";
-    if (node.type === "codeBlock") return "```\n" + inner + "\n```\n";
+    if (node.type === "paragraph" || node.type === "heading") return `${inner}\n`;
+    if (node.type === "listItem") return `- ${inner}\n`;
+    if (node.type === "codeBlock") return `\`\`\`\n${inner}\n\`\`\`\n`;
     return inner;
   }
   return "";
@@ -424,7 +429,11 @@ export class JiraClient {
   }
 
   /** Resolve namedFields (display name → value) into custom field IDs. Mutates `fields`. */
-  private resolveNamedFields(fields: Record<string, unknown>, namedFields: Record<string, string>, issueType: string): void {
+  private resolveNamedFields(
+    fields: Record<string, unknown>,
+    namedFields: Record<string, string>,
+    issueType: string,
+  ): void {
     for (const [fieldName, valueName] of Object.entries(namedFields)) {
       const fs = this.findFieldSchema(fieldName, issueType);
       if (!fs) continue;
@@ -465,7 +474,7 @@ export class JiraClient {
     const SYSTEM = new Set(["project", "issuetype", "summary", "parent", "issueType"]);
     for (const field of ts.fields) {
       if (!field.required || SYSTEM.has(field.system || field.id) || fields[field.id] !== undefined) continue;
-      if (field.allowedValues?.length) fields[field.id] = { id: field.allowedValues[0]!.id };
+      if (field.allowedValues?.length) fields[field.id] = { id: field.allowedValues[0]?.id };
     }
 
     // Auto-assign board team (plain UUID string per Atlassian docs)
@@ -581,11 +590,11 @@ export class JiraClient {
 
     // Board config + team detection
     if (boardId) {
-      await this.discoverBoard(get, schema, boardId);
+      await JiraClient.discoverBoard(get, schema, boardId);
     }
 
     // Statuses + sample tickets
-    await this.discoverStatusesAndSamples(get, schema, projectKey);
+    await JiraClient.discoverStatusesAndSamples(get, schema, projectKey);
 
     return schema;
   }
@@ -621,9 +630,7 @@ export class JiraClient {
       // Sample a board ticket to get the team value (no allowedValues in create meta)
       if (teamFieldId) {
         try {
-          const board = await get<{ issues?: { fields?: Record<string, any> }[] }>(
-            `/rest/agile/1.0/board/${boardId}/issue?maxResults=1&fields=${teamFieldId}`,
-          );
+          const board = await get<any>(`/rest/agile/1.0/board/${boardId}/issue?maxResults=1&fields=${teamFieldId}`);
           const teamValue = board.issues?.[0]?.fields?.[teamFieldId];
           if (teamValue?.id) {
             schema.board.teamFieldId = teamFieldId;

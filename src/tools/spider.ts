@@ -91,10 +91,7 @@ export function registerSpiderTools(server: McpServer, getKb: () => KnowledgeBas
       const typeBreakdown = Object.entries(stats.byType)
         .map(([k, v]) => `${k}:${v}`)
         .join(" ");
-      lines.push(
-        `\nKB total: ${stats.total} pages`,
-        `Types: ${typeBreakdown}`,
-      );
+      lines.push(`\nKB total: ${stats.total} pages`, `Types: ${typeBreakdown}`);
 
       return textResponse(lines.join("\n"));
     },

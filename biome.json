@@ -33,6 +33,18 @@
       "trailingCommas": "all"
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/lib/jira.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
     "includes": ["src/**/*.ts"]
   }
