@@ -132,6 +132,18 @@ class Semaphore {
   }
 }
 
+// ── URL helper ────────────────────────────────────────────────────────────
+
+function buildUrl(path: string, baseUrl: string, params?: Record<string, string>): URL {
+  const url = new URL(path, baseUrl);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  return url;
+}
+
 // ── Client ─────────────────────────────────────────────────────────────────
 
 export class ConfluenceClient {
@@ -150,54 +162,20 @@ export class ConfluenceClient {
   }
 
   private async request<T>(path: string, params?: Record<string, string>): Promise<T> {
-    const url = new URL(path, this.baseUrl);
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        url.searchParams.set(k, v);
-      }
-    }
+    const url = buildUrl(path, this.baseUrl, params);
 
     await this.semaphore.acquire();
     let lastError: Error | undefined;
 
     try {
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          const response = await fetch(url.toString(), {
-            headers: this.headers,
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-          });
-
-          if (response.status === 429) {
-            const retryAfter = response.headers.get("Retry-After");
-            const waitMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : INITIAL_BACKOFF_MS * (1 << attempt);
-            await Bun.sleep(waitMs);
-            continue;
-          }
-
-          if (response.status >= 500) {
-            lastError = new Error(`Confluence API ${response.status}`);
-            await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
-            continue;
-          }
-
-          if (!response.ok) {
-            const text = await response.text();
-            throw new Error(`Confluence API ${response.status}: ${text.slice(0, 200)}`);
-          }
-
-          return response.json() as Promise<T>;
-        } catch (err) {
-          if (err instanceof Error && err.name === "TimeoutError") {
-            lastError = new Error(`Confluence API timeout (${REQUEST_TIMEOUT_MS}ms)`);
-          } else if (err instanceof Error && err.message.startsWith("Confluence API")) {
-            throw err; // 4xx — don't retry
-          } else {
-            lastError = err instanceof Error ? err : new Error(String(err));
-          }
-          if (attempt < MAX_RETRIES - 1) {
-            await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
-          }
+        const result = await this.attemptFetch<T>(url, attempt);
+        if (result.retry) {
+          lastError = result.error;
+          continue;
+        }
+        if (result.value !== undefined) {
+          return result.value;
         }
       }
     } finally {
@@ -205,6 +183,62 @@ export class ConfluenceClient {
     }
 
     throw lastError ?? new Error("Request failed after retries");
+  }
+
+  private async attemptFetch<T>(url: URL, attempt: number): Promise<{ value?: T; retry?: boolean; error?: Error }> {
+    try {
+      const response = await fetch(url.toString(), {
+        headers: this.headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      return await this.handleResponse<T>(response, attempt);
+    } catch (err) {
+      return this.handleFetchError(err, attempt);
+    }
+  }
+
+  private async handleResponse<T>(
+    response: Response,
+    attempt: number,
+  ): Promise<{ value?: T; retry?: boolean; error?: Error }> {
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const waitMs = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : INITIAL_BACKOFF_MS * (1 << attempt);
+      await Bun.sleep(waitMs);
+      return { retry: true };
+    }
+
+    if (response.status >= 500) {
+      await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
+      return { retry: true, error: new Error(`Confluence API ${response.status}`) };
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Confluence API ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    return { value: (await response.json()) as T };
+  }
+
+  private async handleFetchError(err: unknown, attempt: number): Promise<{ retry: boolean; error: Error }> {
+    if (err instanceof Error && err.message.startsWith("Confluence API")) {
+      throw err; // 4xx — don't retry
+    }
+
+    const error =
+      err instanceof Error && err.name === "TimeoutError"
+        ? new Error(`Confluence API timeout (${REQUEST_TIMEOUT_MS}ms)`)
+        : err instanceof Error
+          ? err
+          : new Error(String(err));
+
+    if (attempt < MAX_RETRIES - 1) {
+      await Bun.sleep(INITIAL_BACKOFF_MS * (1 << attempt));
+    }
+
+    return { retry: true, error };
   }
 
   private async *paginateIter<T>(path: string, params?: Record<string, string>): AsyncGenerator<T> {

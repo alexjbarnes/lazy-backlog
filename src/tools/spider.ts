@@ -6,17 +6,20 @@ import type { KnowledgeBase } from "../lib/db.js";
 import { Spider } from "../lib/indexer.js";
 
 export function registerSpiderTools(server: McpServer, getKb: () => KnowledgeBase) {
-  server.tool(
+  server.registerTool(
     "configure",
-    "Configure project settings for Lazy Backlog. Auth credentials must be set as env vars (ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN). This tool stores project-specific settings like Jira project key, board ID, and Confluence spaces — these persist across sessions.",
     {
-      jiraProjectKey: z.string().optional().describe("Jira project key, e.g. BP"),
-      jiraBoardId: z.string().optional().describe("Jira board ID, e.g. 266"),
-      confluenceSpaces: z
-        .array(z.string())
-        .optional()
-        .describe("Confluence space keys to index, e.g. ['Engineering', 'PM']"),
-      rootPageIds: z.array(z.string()).optional().describe("Specific Confluence page IDs to spider from"),
+      description:
+        "Configure project settings for Lazy Backlog. Auth credentials must be set as env vars (ATLASSIAN_SITE_URL, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN). This tool stores project-specific settings like Jira project key, board ID, and Confluence spaces — these persist across sessions.",
+      inputSchema: z.object({
+        jiraProjectKey: z.string().optional().describe("Jira project key, e.g. BP"),
+        jiraBoardId: z.string().optional().describe("Jira board ID, e.g. 266"),
+        confluenceSpaces: z
+          .array(z.string())
+          .optional()
+          .describe("Confluence space keys to index, e.g. ['Engineering', 'PM']"),
+        rootPageIds: z.array(z.string()).optional().describe("Specific Confluence page IDs to spider from"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -55,16 +58,19 @@ export function registerSpiderTools(server: McpServer, getKb: () => KnowledgeBas
     },
   );
 
-  server.tool(
+  server.registerTool(
     "spider",
-    "Crawl and index Confluence pages. Supports incremental sync — only re-indexes changed pages. Use spaceKey for full space, rootPageId for a page tree.",
     {
-      spaceKey: z.string().optional().describe("Confluence space key to crawl"),
-      rootPageId: z.string().optional().describe("Page ID to crawl from (includes descendants)"),
-      maxDepth: z.number().default(10).describe("Max tree depth"),
-      maxConcurrency: z.number().default(5).describe("Parallel page fetches (1-10)"),
-      includeLabels: z.array(z.string()).default([]).describe("Only pages with these labels"),
-      excludeLabels: z.array(z.string()).default([]).describe("Skip pages with these labels"),
+      description:
+        "Crawl and index Confluence pages. Supports incremental sync — only re-indexes changed pages. Use spaceKey for full space, rootPageId for a page tree.",
+      inputSchema: z.object({
+        spaceKey: z.string().optional().describe("Confluence space key to crawl"),
+        rootPageId: z.string().optional().describe("Page ID to crawl from (includes descendants)"),
+        maxDepth: z.number().default(10).describe("Max tree depth"),
+        maxConcurrency: z.number().default(5).describe("Parallel page fetches (1-10)"),
+        includeLabels: z.array(z.string()).default([]).describe("Only pages with these labels"),
+        excludeLabels: z.array(z.string()).default([]).describe("Skip pages with these labels"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -97,27 +103,33 @@ export function registerSpiderTools(server: McpServer, getKb: () => KnowledgeBas
     },
   );
 
-  server.tool("list-spaces", "List Confluence spaces accessible to the configured account.", {}, async () => {
-    const kb = getKb();
-    let config: ReturnType<typeof resolveConfig>;
-    try {
-      config = resolveConfig(kb);
-    } catch (err) {
-      return errorResponse(String(err));
-    }
+  server.registerTool(
+    "list-spaces",
+    { description: "List Confluence spaces accessible to the configured account.", inputSchema: z.object({}) },
+    async () => {
+      const kb = getKb();
+      let config: ReturnType<typeof resolveConfig>;
+      try {
+        config = resolveConfig(kb);
+      } catch (err) {
+        return errorResponse(String(err));
+      }
 
-    const client = new ConfluenceClient(config);
-    const spaces = await client.getSpaces();
+      const client = new ConfluenceClient(config);
+      const spaces = await client.getSpaces();
 
-    if (spaces.length === 0) return textResponse("No spaces found.");
-    const text = spaces.map((s) => `${s.key}: ${s.name} (${s.type})`).join("\n");
-    return textResponse(text);
-  });
+      if (spaces.length === 0) return textResponse("No spaces found.");
+      const text = spaces.map((s) => `${s.key}: ${s.name} (${s.type})`).join("\n");
+      return textResponse(text);
+    },
+  );
 
-  server.tool(
+  server.registerTool(
     "rebuild-index",
-    "Rebuild the FTS5 search index from scratch. Use if search results seem stale or incorrect.",
-    {},
+    {
+      description: "Rebuild the FTS5 search index from scratch. Use if search results seem stale or incorrect.",
+      inputSchema: z.object({}),
+    },
     async () => {
       const kb = getKb();
       kb.rebuildFts();

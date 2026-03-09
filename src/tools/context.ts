@@ -7,14 +7,17 @@ const MAX_PAGE_CHARS = 15_000;
 const MAX_CONTEXT_CHARS = 20_000;
 
 export function registerContextTools(server: McpServer, getKb: () => KnowledgeBase) {
-  server.tool(
+  server.registerTool(
     "search",
-    "Search indexed Confluence content. Returns focused section-level chunks with heading breadcrumbs (e.g. 'Architecture > Auth > OAuth2'), not full pages. Token-efficient — use this as the primary way to answer questions about project knowledge. Supports FTS5: AND, OR, NOT, \"exact phrase\".",
     {
-      query: z.string().describe("Search query"),
-      pageType: z.enum(["adr", "design", "runbook", "meeting", "spec", "other"]).optional(),
-      spaceKey: z.string().optional(),
-      limit: z.number().default(5).describe("Max results (default 5, max 10)"),
+      description:
+        "Search indexed Confluence content. Returns focused section-level chunks with heading breadcrumbs (e.g. 'Architecture > Auth > OAuth2'), not full pages. Token-efficient — use this as the primary way to answer questions about project knowledge. Supports FTS5: AND, OR, NOT, \"exact phrase\".",
+      inputSchema: z.object({
+        query: z.string().describe("Search query"),
+        pageType: z.enum(["adr", "design", "runbook", "meeting", "spec", "other"]).optional(),
+        spaceKey: z.string().optional(),
+        limit: z.number().default(5).describe("Max results (default 5, max 10)"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -58,11 +61,14 @@ export function registerContextTools(server: McpServer, getKb: () => KnowledgeBa
     },
   );
 
-  server.tool(
+  server.registerTool(
     "get-page",
-    "Retrieve full content of an indexed page by its Confluence page ID. Use sparingly — prefer search for focused answers. Content is capped at 15K chars.",
     {
-      pageId: z.string().describe("Confluence page ID"),
+      description:
+        "Retrieve full content of an indexed page by its Confluence page ID. Use sparingly — prefer search for focused answers. Content is capped at 15K chars.",
+      inputSchema: z.object({
+        pageId: z.string().describe("Confluence page ID"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -83,11 +89,13 @@ export function registerContextTools(server: McpServer, getKb: () => KnowledgeBa
     },
   );
 
-  server.tool(
+  server.registerTool(
     "get-adrs",
-    "List all indexed ADRs with title and content preview. Use get-page for full content.",
     {
-      spaceKey: z.string().optional(),
+      description: "List all indexed ADRs with title and content preview. Use get-page for full content.",
+      inputSchema: z.object({
+        spaceKey: z.string().optional(),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -99,11 +107,14 @@ export function registerContextTools(server: McpServer, getKb: () => KnowledgeBa
     },
   );
 
-  server.tool(
+  server.registerTool(
     "get-context-summary",
-    "Synthesized project context from indexed ADRs, design docs, and specs. Compact summary for use as prompt context in ticket generation.",
     {
-      spaceKey: z.string().optional(),
+      description:
+        "Synthesized project context from indexed ADRs, design docs, and specs. Compact summary for use as prompt context in ticket generation.",
+      inputSchema: z.object({
+        spaceKey: z.string().optional(),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -135,20 +146,24 @@ export function registerContextTools(server: McpServer, getKb: () => KnowledgeBa
     },
   );
 
-  server.tool("kb-stats", "Knowledge base statistics: total pages, breakdown by type and space.", {}, async () => {
-    const kb = getKb();
-    const stats = kb.getStats();
-    if (stats.total === 0) return textResponse("Knowledge base is empty.");
+  server.registerTool(
+    "kb-stats",
+    { description: "Knowledge base statistics: total pages, breakdown by type and space.", inputSchema: z.object({}) },
+    async () => {
+      const kb = getKb();
+      const stats = kb.getStats();
+      if (stats.total === 0) return textResponse("Knowledge base is empty.");
 
-    const types = Object.entries(stats.byType)
-      .map(([k, v]) => `  ${k}: ${v}`)
-      .join("\n");
-    const spaces = Object.entries(stats.bySpace)
-      .map(([k, v]) => `  ${k}: ${v}`)
-      .join("\n");
+      const types = Object.entries(stats.byType)
+        .map(([k, v]) => `  ${k}: ${v}`)
+        .join("\n");
+      const spaces = Object.entries(stats.bySpace)
+        .map(([k, v]) => `  ${k}: ${v}`)
+        .join("\n");
 
-    return textResponse(`Total: ${stats.total}\n\nBy type:\n${types}\n\nBy space:\n${spaces}`);
-  });
+      return textResponse(`Total: ${stats.total}\n\nBy type:\n${types}\n\nBy space:\n${spaces}`);
+    },
+  );
 }
 
 export function formatSummaryLine(s: PageSummary): string {

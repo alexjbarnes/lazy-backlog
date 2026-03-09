@@ -3,14 +3,12 @@ import type { ProjectConfig } from "../config/schema.js";
 import type { KnowledgeBase } from "./db.js";
 
 /** Schema for the stored (non-auth) project settings in SQLite. */
-const StoredConfigSchema = z
-  .object({
-    jiraProjectKey: z.string().optional(),
-    jiraBoardId: z.string().optional(),
-    confluenceSpaces: z.array(z.string()).optional(),
-    rootPageIds: z.array(z.string()).optional(),
-  })
-  .passthrough();
+const StoredConfigSchema = z.object({
+  jiraProjectKey: z.string().optional(),
+  jiraBoardId: z.string().optional(),
+  confluenceSpaces: z.array(z.string()).optional(),
+  rootPageIds: z.array(z.string()).optional(),
+});
 
 /** Resolve project config from env vars (preferred) or stored config. */
 export function resolveConfig(kb: KnowledgeBase): ProjectConfig {

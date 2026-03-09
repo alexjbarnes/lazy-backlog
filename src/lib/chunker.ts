@@ -6,7 +6,7 @@
  * Designed for Confluence content that's already been converted to markdown.
  */
 
-import type { Content, Heading, Root } from "mdast";
+import type { Root, RootContent } from "mdast";
 import { toString as nodeToString } from "mdast-util-to-string";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -57,7 +57,7 @@ function parse(md: string): Root {
 interface RawSection {
   heading: string;
   depth: number;
-  nodes: Content[];
+  nodes: RootContent[];
   startOffset: number;
 }
 
@@ -76,16 +76,15 @@ function collectSections(tree: Root): RawSection[] {
 
   for (const node of tree.children) {
     if (node.type === "heading") {
-      const h = node as Heading;
       // Flush current section if it has content
       if (current.nodes.length > 0) {
         sections.push(current);
       }
       current = {
-        heading: nodeToString(h),
-        depth: h.depth,
+        heading: nodeToString(node),
+        depth: node.depth,
         nodes: [],
-        startOffset: h.position?.start.offset ?? 0,
+        startOffset: node.position?.start.offset ?? 0,
       };
     } else {
       current.nodes.push(node);
@@ -106,7 +105,7 @@ function buildBreadcrumb(stack: { heading: string; depth: number }[]): string {
 }
 
 /** Extract plain text from a list of AST nodes. */
-function nodesToText(nodes: Content[]): string {
+function nodesToText(nodes: RootContent[]): string {
   return nodes
     .map((n) => nodeToString(n))
     .join("\n\n")

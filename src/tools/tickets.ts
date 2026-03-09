@@ -278,40 +278,53 @@ export function formatSummaries(pages: PageSummary[], heading: string): string {
   return `### ${heading} (${pages.length} total)\n${items}\n\n`;
 }
 
+/** Format board and general schema info. */
+function formatBoardInfo(schema: JiraSchema): string {
+  let out = "";
+  if (schema.board) {
+    const estimationSuffix = schema.board.estimationField ? ` — estimates in ${schema.board.estimationField}` : "";
+    out += `**Board:** ${schema.board.name} (${schema.board.type})${estimationSuffix}\n`;
+    if (schema.board.columns) out += `**Workflow:** ${schema.board.columns.map((c) => c.name).join(" → ")}\n`;
+  }
+  out += `**Priorities:** ${schema.priorities.map((p) => p.name).join(", ")}\n`;
+  const typeLabels = schema.issueTypes.map((t) => t.name + (t.subtask ? " [subtask]" : "")).join(", ");
+  out += `**Issue Types:** ${typeLabels}\n\n`;
+  return out;
+}
+
+/** Format the fields list for a specific issue type. */
+function formatFieldsList(ts: JiraSchema["issueTypes"][number], issueType: string): string {
+  let out = `## Fields for ${issueType}\n\n`;
+  for (const f of ts.fields) {
+    const valuesLabel = f.allowedValues?.length ? f.allowedValues.map((v) => `\`${v.name}\``).join(", ") : "";
+    const valuesSuffix = valuesLabel ? ` — values: ${valuesLabel}` : "";
+    out += `- **${f.name}** [${f.required ? "REQUIRED" : "optional"}]${valuesSuffix}\n`;
+  }
+  out += `\nPass custom fields via \`namedFields\`: \`{"Field Name": "Value Name"}\`\n`;
+  out += `Required fields with allowed values are auto-filled if not provided.\n\n`;
+  return out;
+}
+
+/** Format sample tickets as conventions. */
+function formatSampleTickets(sampleTickets: NonNullable<JiraSchema["sampleTickets"]>): string {
+  let out = `## Conventions (from recent tickets)\n`;
+  for (const t of sampleTickets.slice(0, 3)) {
+    out += `- ${t.key}: "${t.summary}" [${t.type}, ${t.priority}]\n`;
+  }
+  out += `\n`;
+  return out;
+}
+
 /** Build the schema guidance section for the ticket plan. */
 function buildSchemaGuidance(schema: JiraSchema | null, issueType: string): string {
   if (!schema) return `> No Jira schema found. Run \`setup\` or \`discover-jira\` first.\n\n`;
 
-  let plan = "";
-  if (schema.board) {
-    const estimationSuffix = schema.board.estimationField ? ` — estimates in ${schema.board.estimationField}` : "";
-    plan += `**Board:** ${schema.board.name} (${schema.board.type})${estimationSuffix}\n`;
-    if (schema.board.columns) plan += `**Workflow:** ${schema.board.columns.map((c) => c.name).join(" → ")}\n`;
-  }
-  plan += `**Priorities:** ${schema.priorities.map((p) => p.name).join(", ")}\n`;
-  const typeLabels = schema.issueTypes.map((t) => t.name + (t.subtask ? " [subtask]" : "")).join(", ");
-  plan += `**Issue Types:** ${typeLabels}\n\n`;
+  let plan = formatBoardInfo(schema);
 
   const ts = schema.issueTypes.find((t) => t.name === issueType);
-  if (ts) {
-    plan += `## Fields for ${issueType}\n\n`;
-    for (const f of ts.fields) {
-      const valuesSuffix = f.allowedValues?.length
-        ? ` — values: ${f.allowedValues.map((v) => `\`${v.name}\``).join(", ")}`
-        : "";
-      plan += `- **${f.name}** [${f.required ? "REQUIRED" : "optional"}]${valuesSuffix}\n`;
-    }
-    plan += `\nPass custom fields via \`namedFields\`: \`{"Field Name": "Value Name"}\`\n`;
-    plan += `Required fields with allowed values are auto-filled if not provided.\n\n`;
-  }
+  if (ts) plan += formatFieldsList(ts, issueType);
 
-  if (schema.sampleTickets?.length) {
-    plan += `## Conventions (from recent tickets)\n`;
-    for (const t of schema.sampleTickets.slice(0, 3)) {
-      plan += `- ${t.key}: "${t.summary}" [${t.type}, ${t.priority}]\n`;
-    }
-    plan += `\n`;
-  }
+  if (schema.sampleTickets?.length) plan += formatSampleTickets(schema.sampleTickets);
 
   return plan;
 }
@@ -377,17 +390,20 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Setup (combined Jira discovery + Confluence spider) ──
 
-  server.tool(
+  server.registerTool(
     "setup",
-    "One-time project setup: discovers Jira board structure (issue types, fields, priorities, team) AND spiders Confluence spaces for project context. Run this once after configure. Subsequent runs are incremental.",
     {
-      projectKey: z.string().optional().describe("Jira project key override"),
-      boardId: z.string().optional().describe("Jira board ID override"),
-      spaceKeys: z.preprocess(
-        jsonPreprocess,
-        z.array(z.string()).optional().describe("Confluence space keys to spider"),
-      ),
-      maxDepth: z.number().default(10).describe("Max Confluence tree depth"),
+      description:
+        "One-time project setup: discovers Jira board structure (issue types, fields, priorities, team) AND spiders Confluence spaces for project context. Run this once after configure. Subsequent runs are incremental.",
+      inputSchema: z.object({
+        projectKey: z.string().optional().describe("Jira project key override"),
+        boardId: z.string().optional().describe("Jira board ID override"),
+        spaceKeys: z.preprocess(
+          jsonPreprocess,
+          z.array(z.string()).optional().describe("Confluence space keys to spider"),
+        ),
+        maxDepth: z.number().default(10).describe("Max Confluence tree depth"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -434,12 +450,15 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Discover Jira (standalone) ──
 
-  server.tool(
+  server.registerTool(
     "discover-jira",
-    "Discover and store the Jira project structure — issue types, fields, allowed values, priorities, board config, team. Use 'setup' instead for combined Jira + Confluence initialization.",
     {
-      projectKey: z.string().optional().describe("Jira project key override"),
-      boardId: z.string().optional().describe("Jira board ID override"),
+      description:
+        "Discover and store the Jira project structure — issue types, fields, allowed values, priorities, board config, team. Use 'setup' instead for combined Jira + Confluence initialization.",
+      inputSchema: z.object({
+        projectKey: z.string().optional().describe("Jira project key override"),
+        boardId: z.string().optional().describe("Jira board ID override"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -461,13 +480,16 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Plan Tickets ──
 
-  server.tool(
+  server.registerTool(
     "plan-tickets",
-    "STEP 1 of ticket creation: Plan Jira tickets from a feature description + indexed Confluence context. Always start here — searches Confluence automatically for relevant ADRs, design docs and specs. Workflow: plan-tickets → create-tickets (dryRun=true) → review → create-tickets (dryRun=false).",
     {
-      description: z.string().describe("Feature or task description to decompose into tickets"),
-      spaceKey: z.string().optional().describe("Confluence space to draw context from"),
-      issueType: z.string().default("Task").describe("Issue type to plan for — determines which fields are shown"),
+      description:
+        "STEP 1 of ticket creation: Plan Jira tickets from a feature description + indexed Confluence context. Always start here — searches Confluence automatically for relevant ADRs, design docs and specs. Workflow: plan-tickets → create-tickets (dryRun=true) → review → create-tickets (dryRun=false).",
+      inputSchema: z.object({
+        description: z.string().describe("Feature or task description to decompose into tickets"),
+        spaceKey: z.string().optional().describe("Confluence space to draw context from"),
+        issueType: z.string().default("Task").describe("Issue type to plan for — determines which fields are shown"),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -492,37 +514,40 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Create Tickets ──
 
-  server.tool(
+  server.registerTool(
     "create-tickets",
-    "Create Jira tickets from a structured plan. IMPORTANT: Use plan-tickets first to ground tickets in Confluence context. Supports dry-run preview and live creation. Descriptions are markdown → ADF.",
     {
-      tickets: z.preprocess(
-        jsonPreprocess,
-        z.array(
-          z.object({
-            summary: z.string().describe("Ticket title — concise, action-oriented"),
-            description: z.string().optional().describe("Markdown description with acceptance criteria"),
-            issueType: z
-              .string()
-              .default("Task")
-              .describe("Issue type (e.g. Task, Bug, Epic, Feature, Spike, Sub-task)"),
-            labels: z.array(z.string()).default([]),
-            storyPoints: z.number().optional().describe("Story points estimate"),
-            priority: z.string().default("Medium").describe("Priority name"),
-            parentKey: z.string().optional().describe("Parent issue key (e.g. BP-100)"),
-            components: z.array(z.string()).default([]).describe("Component names"),
-            namedFields: z
-              .record(z.string(), z.string())
-              .optional()
-              .describe("Custom fields by display name → value name"),
-          }),
+      description:
+        "Create Jira tickets from a structured plan. IMPORTANT: Use plan-tickets first to ground tickets in Confluence context. Supports dry-run preview and live creation. Descriptions are markdown → ADF.",
+      inputSchema: z.object({
+        tickets: z.preprocess(
+          jsonPreprocess,
+          z.array(
+            z.object({
+              summary: z.string().describe("Ticket title — concise, action-oriented"),
+              description: z.string().optional().describe("Markdown description with acceptance criteria"),
+              issueType: z
+                .string()
+                .default("Task")
+                .describe("Issue type (e.g. Task, Bug, Epic, Feature, Spike, Sub-task)"),
+              labels: z.array(z.string()).default([]),
+              storyPoints: z.number().optional().describe("Story points estimate"),
+              priority: z.string().default("Medium").describe("Priority name"),
+              parentKey: z.string().optional().describe("Parent issue key (e.g. BP-100)"),
+              components: z.array(z.string()).default([]).describe("Component names"),
+              namedFields: z
+                .record(z.string(), z.string())
+                .optional()
+                .describe("Custom fields by display name → value name"),
+            }),
+          ),
         ),
-      ),
-      projectKey: z.string().optional().describe("Jira project key override"),
-      dryRun: z.preprocess(
-        boolPreprocess,
-        z.boolean().default(true).describe("Preview without creating (default: true)"),
-      ),
+        projectKey: z.string().optional().describe("Jira project key override"),
+        dryRun: z.preprocess(
+          boolPreprocess,
+          z.boolean().default(true).describe("Preview without creating (default: true)"),
+        ),
+      }),
     },
     async (params) => {
       const kb = getKb();
@@ -551,7 +576,7 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
           const meta = [
             t.issueType,
             t.priority,
-            t.storyPoints != null ? `${t.storyPoints}pts` : "",
+            t.storyPoints == null ? "" : `${t.storyPoints}pts`,
             t.labels.length ? t.labels.join(",") : "",
             t.parentKey ? `parent: ${t.parentKey}` : "",
             t.components.length ? `components: ${componentsList}` : "",
@@ -604,10 +629,13 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Get Ticket ──
 
-  server.tool(
+  server.registerTool(
     "get-ticket",
-    "Fetch a Jira ticket's full details — summary, description, status, priority, story points, labels, components, assignee, recent comments.",
-    { issueKey: z.string().describe("Jira issue key (e.g. BP-123)") },
+    {
+      description:
+        "Fetch a Jira ticket's full details — summary, description, status, priority, story points, labels, components, assignee, recent comments.",
+      inputSchema: z.object({ issueKey: z.string().describe("Jira issue key (e.g. BP-123)") }),
+    },
     async (params) => {
       const kb = getKb();
       try {
@@ -637,19 +665,22 @@ export function registerTicketTools(server: McpServer, getKb: () => KnowledgeBas
 
   // ── Update Ticket ──
 
-  server.tool(
+  server.registerTool(
     "update-ticket",
-    "Update an existing Jira ticket. Only provided fields are modified. Supports summary, description, priority, labels, story points, components, custom fields, and comments.",
     {
-      issueKey: z.string().describe("Jira issue key (e.g. BP-123)"),
-      summary: z.string().optional().describe("New ticket title"),
-      description: z.string().optional().describe("New markdown description (replaces existing)"),
-      priority: z.string().optional().describe("New priority name"),
-      labels: z.array(z.string()).optional().describe("Replace all labels"),
-      storyPoints: z.number().optional().describe("New story points estimate"),
-      components: z.array(z.string()).optional().describe("Replace all components"),
-      namedFields: z.record(z.string(), z.string()).optional().describe("Custom fields by display name → value name"),
-      comment: z.string().optional().describe("Add a comment (markdown → ADF)"),
+      description:
+        "Update an existing Jira ticket. Only provided fields are modified. Supports summary, description, priority, labels, story points, components, custom fields, and comments.",
+      inputSchema: z.object({
+        issueKey: z.string().describe("Jira issue key (e.g. BP-123)"),
+        summary: z.string().optional().describe("New ticket title"),
+        description: z.string().optional().describe("New markdown description (replaces existing)"),
+        priority: z.string().optional().describe("New priority name"),
+        labels: z.array(z.string()).optional().describe("Replace all labels"),
+        storyPoints: z.number().optional().describe("New story points estimate"),
+        components: z.array(z.string()).optional().describe("Replace all components"),
+        namedFields: z.record(z.string(), z.string()).optional().describe("Custom fields by display name → value name"),
+        comment: z.string().optional().describe("Add a comment (markdown → ADF)"),
+      }),
     },
     async (params) => {
       const kb = getKb();

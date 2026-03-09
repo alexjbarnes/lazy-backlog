@@ -20,6 +20,9 @@ export function createMockServer() {
         tools.set(_name, callback);
       }
     },
+    registerTool: (_name: string, _config: { description: string; inputSchema: unknown }, callback: ToolCallback) => {
+      tools.set(_name, callback);
+    },
   } as unknown as McpServer;
 
   return {

@@ -5,7 +5,7 @@ export type PageType = (typeof PAGE_TYPES)[number];
 
 export const ProjectConfigSchema = z.object({
   siteUrl: z.string().describe("Atlassian Cloud site URL, e.g. https://yoursite.atlassian.net"),
-  email: z.string().email().describe("Atlassian account email"),
+  email: z.email().describe("Atlassian account email"),
   apiToken: z.string().describe("Atlassian API token"),
   jiraProjectKey: z.string().optional().describe("Default Jira project key for ticket creation"),
   jiraBoardId: z.string().optional().describe("Jira board ID for sprint/workflow context"),
