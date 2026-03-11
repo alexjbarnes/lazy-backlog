@@ -1,4 +1,4 @@
-import type { SqliteDatabase } from "./sqlite.js";
+import type { SqliteDatabase, Statement } from "./sqlite.js";
 
 /** Configure SQLite PRAGMAs for performance. */
 export function configurePragmas(db: SqliteDatabase): void {
@@ -190,8 +190,48 @@ export function initSchema(db: SqliteDatabase): void {
   `);
 }
 
+/** Map of all pre-prepared CRUD statements. */
+export interface PreparedStatements {
+  upsert: Statement;
+  getById: Statement;
+  getByType: Statement;
+  getByTypeAndSpace: Statement;
+  summariesByType: Statement;
+  summariesByTypeAndSpace: Statement;
+  stats: Statement;
+  getConfig: Statement;
+  setConfig: Statement;
+  deleteBySpace: Statement;
+  countBySpaceKey: Statement;
+  getUpdatedAt: Statement;
+  insertChunk: Statement;
+  deleteChunksByPage: Statement;
+  getChunksByPage: Statement;
+  upsertSprint: Statement;
+  getSprintById: Statement;
+  getSprintsByBoard: Statement;
+  getSprintsByBoardAndState: Statement;
+  insertChangelog: Statement;
+  getChangelogByIssue: Statement;
+  getChangelogByIssueAndField: Statement;
+  deleteChangelogByIssue: Statement;
+  getStalePages: Statement;
+  getStalePagesFiltered: Statement;
+  getStalePagesTyped: Statement;
+  getStalePagesAll: Statement;
+  getRecentlyIndexed: Statement;
+  upsertTeamRule: Statement;
+  getAllTeamRules: Statement;
+  getTeamRulesByCategory: Statement;
+  getTeamRulesByCategoryAndType: Statement;
+  getTeamRulesByIssueType: Statement;
+  deleteAllTeamRules: Statement;
+  insertAnalysis: Statement;
+  getLatestAnalysis: Statement;
+}
+
 /** Pre-prepare all CRUD statements to avoid dynamic SQL. */
-export function prepareStatements(db: SqliteDatabase) {
+export function prepareStatements(db: SqliteDatabase): PreparedStatements {
   return {
     upsert: db.prepare(
       `INSERT INTO pages (id, space_key, title, url, content, page_type, labels, parent_id, author_id, created_at, updated_at, indexed_at)
@@ -308,5 +348,3 @@ export function prepareStatements(db: SqliteDatabase) {
   };
 }
 
-/** Type alias for the prepared statements object. */
-export type PreparedStatements = ReturnType<typeof prepareStatements>;
