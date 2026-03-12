@@ -85,6 +85,23 @@ function buildUrl(path: string, baseUrl: string, params?: Record<string, string>
   return url;
 }
 
+/**
+ * Build a user-facing Confluence page URL.
+ * Prefers the `_links.webui` path from the API when available,
+ * falling back to a constructed path from space key and page ID.
+ * Avoids duplicating the `/wiki` prefix if already present.
+ */
+function buildPageUrl(baseUrl: string, webui: string | undefined, pageId: string, spaceKey?: string): string {
+  if (webui) {
+    const prefix = webui.startsWith("/wiki") ? "" : "/wiki";
+    return `${baseUrl}${prefix}${webui}`;
+  }
+  if (spaceKey) {
+    return `${baseUrl}/wiki/spaces/${spaceKey}/pages/${pageId}`;
+  }
+  return `${baseUrl}/wiki/pages/${pageId}`;
+}
+
 // ── Client ─────────────────────────────────────────────────────────────────
 
 export class ConfluenceClient {
@@ -208,17 +225,18 @@ export class ConfluenceClient {
         spaceKey: c.space?.key || "",
         body: htmlToMarkdown(c.body?.storage?.value || ""),
         labels: (c.metadata?.labels?.results || []).map((l) => l.name),
-        url: c._links?.webui ? `${this.baseUrl}/wiki${c._links.webui}` : undefined,
+        url: buildPageUrl(this.baseUrl, c._links?.webui, String(c.id), c.space?.key),
         status: c.status || "current",
       };
     });
   }
 
-  private mapPage(raw: ApiPage): ConfluencePage {
+  private mapPage(raw: ApiPage, spaceKey?: string): ConfluencePage {
     return {
       id: String(raw.id),
       title: raw.title || "",
       spaceId: raw.spaceId || "",
+      spaceKey,
       parentId: raw.parentId ? String(raw.parentId) : undefined,
       status: raw.status || "current",
       body: raw.body?.storage?.value ? htmlToMarkdown(raw.body.storage.value) : undefined,
@@ -226,7 +244,7 @@ export class ConfluenceClient {
       authorId: raw.authorId,
       createdAt: raw.createdAt,
       updatedAt: raw.version?.createdAt || raw.createdAt,
-      url: raw._links?.webui ? `${this.baseUrl}/wiki${raw._links.webui}` : undefined,
+      url: buildPageUrl(this.baseUrl, raw._links?.webui, String(raw.id), spaceKey),
     };
   }
 }
