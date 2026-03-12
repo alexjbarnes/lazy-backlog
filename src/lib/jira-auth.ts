@@ -3,12 +3,38 @@
  * Extracted to avoid circular imports between jira.ts and jira-schema.ts.
  */
 
-const LOOPBACK_RE = /^https?:\/\/(?:localhost|127\.\d+\.\d+\.\d+)(?:[:/]|$)/i;
-const CLASS_A_RE = /^https?:\/\/10\.\d+\.\d+\.\d+(?:[:/]|$)/i;
-const CLASS_B_RE = /^https?:\/\/172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+(?:[:/]|$)/i;
-const CLASS_C_RE = /^https?:\/\/192\.168\.\d+\.\d+(?:[:/]|$)/i;
+/** Check whether a dotted-quad IPv4 address is in a private/reserved range. */
+function isPrivateIPv4(a: number, b: number): boolean {
+  if (a === 127 || a === 10 || a === 0) return true; // loopback, class A private, zero
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 169 && b === 254) return true; // link-local / cloud metadata
+  return false;
+}
+
+/** Check whether a hostname (from `new URL().hostname`) is private/internal. */
+function isPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+
+  if (h === "localhost" || h === "::1" || h === "[::1]") return true;
+
+  const parts = h.split(".");
+  if (parts.length === 4 && parts.every((p) => /^\d+$/.test(p))) {
+    const [a, b] = parts.map(Number) as [number, number, number, number];
+    return isPrivateIPv4(a, b);
+  }
+
+  return false;
+}
+
 export const PRIVATE_HOST_RE = {
-  test: (url: string) => LOOPBACK_RE.test(url) || CLASS_A_RE.test(url) || CLASS_B_RE.test(url) || CLASS_C_RE.test(url),
+  test: (url: string) => {
+    try {
+      return isPrivateHost(new URL(url).hostname);
+    } catch {
+      return true; // malformed URLs are rejected
+    }
+  },
 };
 
 export function validateSiteUrl(url: string): void {
@@ -17,8 +43,9 @@ export function validateSiteUrl(url: string): void {
 }
 
 export function authHeaders(email: string, apiToken: string): Record<string, string> {
+  const credentials = Buffer.from(`${email}:${apiToken}`).toString("base64");
   return {
-    Authorization: `Basic ${Buffer.from(email + ":" + apiToken).toString("base64")}`,
+    Authorization: `Basic ${credentials}`,
     Accept: "application/json",
     "Content-Type": "application/json",
   };
