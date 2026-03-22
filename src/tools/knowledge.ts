@@ -15,6 +15,9 @@ type ToolResponse = {
 export const MAX_PAGE_CHARS = 15_000;
 export const MAX_CONTEXT_CHARS = 20_000;
 
+const STALE_CUTOFF_DAYS = 90;
+const RECENT_DAYS = 7;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 export function formatSummaryLine(s: PageSummary): string {
@@ -97,16 +100,13 @@ function handleSearch(
 }
 
 function handleStats(
-  params: { source?: string; spaceKey?: string; summarize: boolean },
+  params: { source?: string; spaceKey?: string; pageType?: string },
   kb: KnowledgeBase,
 ): ToolResponse {
   const stats = kb.getStats();
   if (stats.total === 0) return textResponse("Knowledge base is empty.");
 
-  if (params.summarize) {
-    return handleSummarize(params, kb);
-  }
-
+  // ── Counts by type / space / source ──
   const types = Object.entries(stats.byType)
     .map(([k, v]) => `  ${k}: ${v}`)
     .join("\n");
@@ -114,7 +114,9 @@ function handleStats(
     .map(([k, v]) => `  ${k}: ${v}`)
     .join("\n");
 
-  let out = `Total: ${stats.total}\n\nBy type:\n${types}\n\nBy space:\n${spaces}`;
+  let out = `# Knowledge Base Dashboard\n\n`;
+  out += `**Total pages:** ${stats.total}\n\n`;
+  out += `By type:\n${types}\n\nBy space:\n${spaces}`;
 
   if (stats.bySource) {
     const sources = Object.entries(stats.bySource)
@@ -123,33 +125,79 @@ function handleStats(
     out += `\n\nBy source:\n${sources}`;
   }
 
-  return textResponse(out);
-}
-
-function handleSummarize(params: { spaceKey?: string; source?: string }, kb: KnowledgeBase): ToolResponse {
-  const stats = kb.getStats();
-  if (stats.total === 0) return errorResponse("Knowledge base empty. Index content first.");
-
+  // ── Context summary (ADRs, designs, specs) ──
   const adrs = kb.getPageSummaries("adr", params.spaceKey, params.source);
   const designs = kb.getPageSummaries("design", params.spaceKey, params.source);
   const specs = kb.getPageSummaries("spec", params.spaceKey, params.source);
 
-  let out = "# Project Context\n";
-  out += `${stats.total} pages | ${Object.entries(stats.byType)
-    .map(([k, v]) => `${k}:${v}`)
-    .join(" ")}\n\n`;
+  if (adrs.length > 0 || designs.length > 0 || specs.length > 0) {
+    out += "\n\n---\n\n# Context Summary\n\n";
+    let budget = MAX_CONTEXT_CHARS - out.length;
 
-  let budget = MAX_CONTEXT_CHARS - out.length;
+    budget = appendSection(adrs, "ADRs", 20, budget, (s) => {
+      out += s;
+    });
+    budget = appendSection(designs, "Design Docs", 10, budget, (s) => {
+      out += s;
+    });
+    appendSection(specs, "Specs", 10, budget, (s) => {
+      out += s;
+    });
+  }
 
-  budget = appendSection(adrs, "ADRs", 20, budget, (s) => {
-    out += s;
+  // ── Recent changes (last 7 days) ──
+  const recentCutoff = new Date();
+  recentCutoff.setDate(recentCutoff.getDate() - RECENT_DAYS);
+  const recentPages = kb.getRecentlyIndexed(recentCutoff.toISOString(), params.source);
+
+  if (recentPages.length > 0) {
+    out += `\n\n---\n\n## Recent Changes (last ${RECENT_DAYS} days): ${recentPages.length}\n\n`;
+    const shown = recentPages.slice(0, 10);
+    for (const p of shown) {
+      out += `- **${p.title}** (${p.space_key}) [${p.page_type}] indexed ${p.indexed_at.slice(0, 10)}\n`;
+    }
+    if (recentPages.length > 10) {
+      out += `\u2026and ${recentPages.length - 10} more\n`;
+    }
+  } else {
+    out += `\n\n---\n\n## Recent Changes (last ${RECENT_DAYS} days): none\n`;
+  }
+
+  // ── Stale docs (90-day cutoff) ──
+  const staleCutoff = new Date();
+  staleCutoff.setDate(staleCutoff.getDate() - STALE_CUTOFF_DAYS);
+  const stalePages = kb.getStalePages(staleCutoff.toISOString(), {
+    spaceKey: params.spaceKey,
+    pageType: params.pageType,
+    source: params.source,
   });
-  budget = appendSection(designs, "Design Docs", 10, budget, (s) => {
-    out += s;
-  });
-  appendSection(specs, "Specs", 10, budget, (s) => {
-    out += s;
-  });
+
+  if (stalePages.length > 0) {
+    out += `\n## Stale Docs (>${STALE_CUTOFF_DAYS} days): ${stalePages.length}\n\n`;
+    const top5 = stalePages.slice(0, 5);
+    for (const p of top5) {
+      const daysAgo = Math.floor(
+        (Date.now() - new Date(p.updated_at ?? p.indexed_at).getTime()) / (1000 * 60 * 60 * 24),
+      );
+      out += `- **${p.title}** (${p.space_key}) [${p.page_type}] \u2014 ${daysAgo}d ago\n`;
+    }
+    if (stalePages.length > 5) {
+      out += `\u2026and ${stalePages.length - 5} more\n`;
+    }
+  }
+
+  // ── KB Health Indicator ──
+  const freshCount = stats.total - stalePages.length;
+  const freshPct = Math.round((freshCount / stats.total) * 100);
+  let health: string;
+  if (freshPct > 80) {
+    health = "healthy";
+  } else if (freshPct >= 50) {
+    health = "needs-attention";
+  } else {
+    health = "stale";
+  }
+  out += `\n## KB Health: **${health}** (${freshPct}% of pages updated within ${STALE_CUTOFF_DAYS} days)\n`;
 
   return textResponse(out);
 }
@@ -172,46 +220,6 @@ function handleGetPage(params: { pageId?: string }, kb: KnowledgeBase): ToolResp
   );
 }
 
-function handleStaleDocs(
-  params: { staleDays: number; spaceKey?: string; pageType?: string; source?: string },
-  kb: KnowledgeBase,
-): ToolResponse {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - params.staleDays);
-  const cutoffStr = cutoff.toISOString();
-
-  const stalePages = kb.getStalePages(cutoffStr, {
-    spaceKey: params.spaceKey,
-    pageType: params.pageType,
-    source: params.source,
-  });
-
-  if (stalePages.length === 0) {
-    return textResponse(`No pages older than ${params.staleDays} days found.`);
-  }
-
-  const lines = stalePages.map((p) => {
-    const daysAgo = Math.floor((Date.now() - new Date(p.updated_at ?? p.indexed_at).getTime()) / (1000 * 60 * 60 * 24));
-    return `- **${p.title}** (${p.space_key}) [${p.page_type}] \u2014 ${daysAgo}d ago`;
-  });
-
-  return textResponse(`${stalePages.length} stale pages (>${params.staleDays}d):\n\n${lines.join("\n")}`);
-}
-
-function handleWhatChanged(params: { since: string; source?: string }, kb: KnowledgeBase): ToolResponse {
-  const pages = kb.getRecentlyIndexed(params.since, params.source);
-
-  if (pages.length === 0) {
-    return textResponse(`No changes since ${params.since.slice(0, 10)}.`);
-  }
-
-  const lines = pages.map((p) => {
-    return `- **${p.title}** (${p.space_key}) [${p.page_type}] indexed ${p.indexed_at.slice(0, 10)}`;
-  });
-
-  return textResponse(`${pages.length} pages changed since ${params.since.slice(0, 10)}:\n\n${lines.join("\n")}`);
-}
-
 // ── Tool Registration ────────────────────────────────────────────────────────
 
 export function registerKnowledgeTool(server: McpServer, getKb: () => KnowledgeBase) {
@@ -219,9 +227,9 @@ export function registerKnowledgeTool(server: McpServer, getKb: () => KnowledgeB
     "knowledge",
     {
       description:
-        "Knowledge base operations. Search indexed content from all sources (Confluence, GitHub, etc.). Use 'search' for full-text queries, 'get-page' for full content, 'stats' for KB overview, 'stale-docs' for outdated content, 'what-changed' for recent updates.",
+        "Knowledge base operations. Search indexed content from all sources (Confluence, GitHub, etc.). Use 'search' for full-text queries, 'get-page' for full content, 'stats' for KB dashboard with context summary, recent changes, stale docs, and health indicator.",
       inputSchema: z.object({
-        action: z.enum(["search", "stats", "get-page", "stale-docs", "what-changed"]),
+        action: z.enum(["search", "stats", "get-page"]),
         query: z.string().optional().describe("[search] Full-text search query"),
         pageId: z.string().optional().describe("[get-page] Page ID to retrieve"),
         source: z.string().optional().describe("Filter by source (e.g. 'confluence', 'github')"),
@@ -231,15 +239,6 @@ export function registerKnowledgeTool(server: McpServer, getKb: () => KnowledgeB
           .describe("Filter results by page type"),
         spaceKey: z.string().optional().describe("Filter by namespace/space key"),
         limit: z.number().default(5).describe("[search] Max results to return"),
-        summarize: z
-          .boolean()
-          .default(false)
-          .describe("[search, stats] Return a context summary (ADRs, designs, specs) instead of raw results"),
-        staleDays: z
-          .number()
-          .default(90)
-          .describe("[stale-docs] Pages not updated in this many days are considered stale"),
-        since: z.string().optional().describe("[what-changed] ISO date — only show pages changed after this date"),
       }),
     },
     async (params) => {
@@ -256,12 +255,6 @@ export function registerKnowledgeTool(server: McpServer, getKb: () => KnowledgeB
           return handleStats(params, kb);
         case "get-page":
           return handleGetPage(params, kb);
-        case "stale-docs":
-          return handleStaleDocs(params, kb);
-        case "what-changed": {
-          if (!params.since) return errorResponse("'since' (ISO date) is required for what-changed action.");
-          return handleWhatChanged({ since: params.since, source: params.source }, kb);
-        }
         default: {
           const _exhaustive: never = params.action;
           return errorResponse(`Unknown action: ${_exhaustive}`);
