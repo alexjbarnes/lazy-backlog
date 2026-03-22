@@ -3,6 +3,7 @@ import { errorResponse, textResponse } from "../lib/config.js";
 import { groupBy } from "../lib/db.js";
 import type { JiraClient, SearchIssue } from "../lib/jira.js";
 import { fetchSprintData, getStoryPoints } from "./sprints-utils.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ──
 
@@ -321,5 +322,6 @@ export async function handleRetroAction(
     formatScopeCreep(issues, sprint.startDate) +
     formatTimeInStatus(completed, cycleData);
 
-  return textResponse(out);
+  const suggestions = buildSuggestions("insights", "retro", {});
+  return textResponse(out + suggestions);
 }

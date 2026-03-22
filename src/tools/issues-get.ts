@@ -1,5 +1,6 @@
 import { buildJiraClient, errorResponse, textResponse } from "../lib/config.js";
 import type { KnowledgeBase } from "../lib/db.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -125,7 +126,10 @@ async function handleSingleIssue(
   if (issue.description) out += `\n## Description\n${issue.description}\n`;
   out += formatIssueLinks(links);
   out += formatComments(issue.comments);
-  return textResponse(out);
+  const hasMissingFields =
+    !issue.description || !issue.assignee || issue.labels.length === 0 || issue.components.length === 0;
+  const suggestions = buildSuggestions("issues", "get", { hasMissingFields });
+  return textResponse(out + suggestions);
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +296,9 @@ export async function handleSearchAction(
         ? await jira.searchBoardIssues(boardId, jql, params.maxResults)
         : await jira.searchIssues(jql, undefined, params.maxResults);
 
-    return textResponse(formatSearchResults(result.issues as SearchIssue[], result.total, params.jql));
+    const resultCount = result.issues.length;
+    const suggestions = buildSuggestions("issues", "search", { resultCount });
+    return textResponse(formatSearchResults(result.issues as SearchIssue[], result.total, params.jql) + suggestions);
   } catch (err: unknown) {
     return errorResponse(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -4,6 +4,7 @@ import { buildJiraClient, errorResponse, textResponse } from "../lib/config.js";
 import type { KnowledgeBase } from "../lib/db.js";
 import { jaccardSimilarity, tokenize } from "../lib/duplicate-detect.js";
 import type { JiraClient, SearchIssue } from "../lib/jira.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,17 @@ async function handleList(
       out += detectDuplicates(result.issues);
     }
 
-    return textResponse(out);
+    const orphanedCount = result.issues.filter((i) => !(i.fields as Record<string, unknown>).parent).length;
+    const unestimatedCount = result.issues.filter((i) => {
+      const f = i.fields as Record<string, unknown>;
+      const sp =
+        (jira.storyPointsFieldId ? (f[jira.storyPointsFieldId] as number | undefined) : undefined) ??
+        (f.story_points as number | undefined) ??
+        (f.customfield_10016 as number | undefined);
+      return sp == null;
+    }).length;
+    const suggestions = buildSuggestions("backlog", "list", { orphanedCount, unestimatedCount });
+    return textResponse(out + suggestions);
   } catch (err: unknown) {
     return errorResponse(`Backlog failed: ${err instanceof Error ? err.message : String(err)}`);
   }

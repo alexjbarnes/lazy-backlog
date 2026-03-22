@@ -7,6 +7,7 @@ import type { SearchIssue } from "../lib/jira-types.js";
 import { handleHealthAction } from "./sprints-analytics.js";
 import { handleCreateSprintAction, handleGoalAction, handleMoveIssuesAction } from "./sprints-mutations.js";
 import { getStoryPoints } from "./sprints-utils.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Barrel re-exports ─────────────────────────────────────────────────────────
 
@@ -134,7 +135,20 @@ async function handleGetAction(params: { sprintId?: string }, jira: JiraClient, 
   out += formatIssuesByStatus(byStatus, spFieldId);
   out += formatIssuesByAssignee(byAssignee, spFieldId);
 
-  return textResponse(out);
+  const blockerCount = issues.filter((i) => (i.fields.priority?.name ?? "").toLowerCase().includes("block")).length;
+  const carryoverCount = issues.filter((i) => {
+    const status = (i.fields.status?.name ?? "").toLowerCase();
+    return status !== "done" && status !== "closed" && status !== "resolved";
+  }).length;
+  const isClosedSprint = sprint.state === "closed";
+  const completionPct = totals.totalSP > 0 ? Math.round((totals.doneSP / totals.totalSP) * 100) : 100;
+  const suggestions = buildSuggestions("sprints", "get", {
+    blockerCount,
+    healthScore: completionPct,
+    carryoverCount,
+    isClosedSprint,
+  });
+  return textResponse(out + suggestions);
 }
 
 // ── Tool Registration ─────────────────────────────────────────────────────────

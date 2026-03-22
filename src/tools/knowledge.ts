@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResponse, formatLabels, textResponse } from "../lib/config.js";
 import type { KnowledgeBase, PageSummary } from "../lib/db.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -123,7 +124,15 @@ function handleStats(
     out += `\n\nBy source:\n${sources}`;
   }
 
-  return textResponse(out);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90);
+  const stalePages = kb.getStalePages(cutoff.toISOString(), {
+    spaceKey: params.spaceKey,
+    source: params.source,
+  });
+  const staleCount = stalePages.length;
+  const suggestions = buildSuggestions("knowledge", "stats", { staleCount });
+  return textResponse(out + suggestions);
 }
 
 function handleSummarize(params: { spaceKey?: string; source?: string }, kb: KnowledgeBase): ToolResponse {

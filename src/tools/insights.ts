@@ -6,6 +6,7 @@ import { formatTeamInsights } from "../lib/team-insights.js";
 import { loadTeamInsights } from "./issues-helpers.js";
 import { handleVelocityAction } from "./sprints-analytics.js";
 import { handleRetroAction } from "./sprints-retro.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -114,7 +115,9 @@ async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBas
     }
   }
 
-  return textResponse(out);
+  const behindSchedule = remainingPoints > completedPoints;
+  const suggestions = buildSuggestions("insights", "epic-progress", { behindSchedule });
+  return textResponse(out + suggestions);
 }
 
 // ── Tool Registration ────────────────────────────────────────────────────────
