@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { computeVelocity } from "../lib/analytics.js";
 import { buildJiraClient, errorResponse, textResponse } from "../lib/config.js";
 import type { KnowledgeBase } from "../lib/db.js";
 import { formatTeamInsights } from "../lib/team-insights.js";
+import { handlePlanAction } from "./insights-plan.js";
 import { loadTeamInsights } from "./issues-helpers.js";
-import { handleVelocityAction } from "./sprints-analytics.js";
 import { handleRetroAction } from "./sprints-retro.js";
+import { fetchSprintData } from "./sprints-utils.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,7 +66,7 @@ function handleTeamProfile(kb: KnowledgeBase): ToolResponse {
 async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBase): Promise<ToolResponse> {
   if (!params.epicKey) return errorResponse("epicKey is required for 'epic-progress' action.");
 
-  const { jira } = buildJiraClient(kb);
+  const { jira, config } = buildJiraClient(kb);
   const issues = await jira.getEpicIssues(params.epicKey);
   const spField = jira.storyPointsFieldId;
 
@@ -114,6 +116,39 @@ async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBas
     }
   }
 
+  // Forecast based on velocity
+  if (remainingPoints > 0) {
+    const boardId = config.jiraBoardId ?? "";
+    if (boardId) {
+      try {
+        const sprintData = await fetchSprintData(jira, boardId, 5);
+        if (sprintData.length > 0) {
+          const velocity = computeVelocity(sprintData);
+          if (velocity.average > 0) {
+            const sprintsRemaining = Math.ceil(remainingPoints / velocity.average);
+            const weeksRemaining = sprintsRemaining * 2;
+            const estDate = new Date();
+            estDate.setDate(estDate.getDate() + weeksRemaining * 7);
+            const dateStr = estDate.toISOString().slice(0, 10);
+
+            out += `\n## Forecast\n`;
+            out += `**At current velocity (~${Math.round(velocity.average)} SP/sprint), estimated completion in ${sprintsRemaining} sprint${sprintsRemaining === 1 ? "" : "s"} (~${dateStr})**\n`;
+
+            const stddev = Math.sqrt(
+              velocity.sprints.reduce((sum, s) => sum + (s.completed - velocity.average) ** 2, 0) /
+                velocity.sprints.length,
+            );
+            if (velocity.trendSlope < -1 || stddev > velocity.average * 0.3) {
+              out += "\n> Warning: High uncertainty -- velocity is unstable\n";
+            }
+          }
+        }
+      } catch {
+        // Velocity data unavailable — skip forecast
+      }
+    }
+  }
+
   return textResponse(out);
 }
 
@@ -127,22 +162,18 @@ export function registerInsightsTool(server: McpServer, getKb: () => KnowledgeBa
         "Team intelligence and analytics. Use this tool for understanding team performance, patterns, and progress. " +
         "Actions: 'team-profile' — view stored team intelligence from setup: who owns what components, estimation patterns, " +
         "description templates, rework rates, and conventions (zero API calls — reads local analysis). " +
-        "'epic-progress' — show epic completion stats (issues, story points, remaining work). " +
-        "'velocity' — team velocity trends across past sprints. " +
-        "'retro' — sprint retrospective data (scope creep, cycle time, time-in-status, carry-over).",
+        "'epic-progress' — show epic completion stats with velocity-based forecast. " +
+        "'retro' — sprint retrospective data (scope creep, cycle time, workload distribution, carry-over). " +
+        "'plan' — sprint planning assistant: velocity, carryover, capacity budget, recommended items from backlog.",
       inputSchema: z.object({
-        action: z.enum(["team-profile", "epic-progress", "velocity", "retro"]),
+        action: z.enum(["team-profile", "epic-progress", "retro", "plan"]),
         epicKey: z.string().optional().describe("[epic-progress] Epic issue key, e.g. 'BP-100'"),
         sprintId: z.string().optional().describe("[retro] Sprint ID. Omit to use most recent closed sprint"),
         sprintCount: z
           .number()
           .default(5)
           .optional()
-          .describe("[velocity, retro] Number of past closed sprints to analyze"),
-        trendMetrics: z
-          .array(z.enum(["velocity", "bugRate", "scopeChange"]))
-          .optional()
-          .describe("[velocity] Metrics to compute: velocity (story points), bugRate, scopeChange"),
+          .describe("[retro, plan] Number of past closed sprints to analyze"),
       }),
     },
     async (params) => {
@@ -155,11 +186,8 @@ export function registerInsightsTool(server: McpServer, getKb: () => KnowledgeBa
         case "epic-progress":
           return handleEpicProgress(params, kb);
 
-        case "velocity": {
-          const { jira, config } = buildJiraClient(kb);
-          const boardId = config.jiraBoardId ?? "";
-          return handleVelocityAction(params, jira, boardId);
-        }
+        case "plan":
+          return handlePlanAction(params, kb);
 
         case "retro": {
           const { jira, config } = buildJiraClient(kb);
