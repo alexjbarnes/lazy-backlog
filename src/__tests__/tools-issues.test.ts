@@ -10,6 +10,7 @@ import {
   boolPreprocess,
   buildKbContextSection,
   buildSchemaGuidance,
+  checkEnrichmentGaps,
   extractKeywords,
   formatBoardInfo,
   formatFieldsList,
@@ -2249,5 +2250,154 @@ describe("issues-helpers", () => {
       expect(result).toContain("Page 24");
       expect(result).not.toContain("Page 25");
     });
+  });
+});
+
+// ── checkEnrichmentGaps (unit tests) ────────────────────────────────────────
+
+describe("checkEnrichmentGaps", () => {
+  it("reports all gaps for a completely empty issue", () => {
+    const { gaps, suggestions } = checkEnrichmentGaps({ fields: {} });
+    expect(gaps).toContain("Description is very short or missing");
+    expect(gaps).toContain("No story points assigned");
+    expect(gaps).toContain("No labels assigned");
+    expect(gaps).toContain("No components assigned");
+    expect(suggestions.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("reports no gaps for a fully populated issue", () => {
+    const longDesc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "It includes acceptance criteria.\n- [ ] First criterion\n- [ ] Second criterion";
+    const { gaps, suggestions } = checkEnrichmentGaps({
+      fields: {
+        description: longDesc,
+        story_points: 5,
+        labels: ["tech-debt"],
+        components: [{ name: "frontend" }],
+      },
+    });
+    expect(gaps).toHaveLength(0);
+    expect(suggestions).toHaveLength(0);
+  });
+
+  it("detects missing acceptance criteria in description", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "It explains the requirements but has no AC checkboxes or AC heading.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via checkbox pattern", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "Requirements:\n- [ ] Must handle edge case\n- [x] Must validate input";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via 'Acceptance Criteria' heading", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "## Acceptance Criteria\nThe system should respond within 200ms.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via 'AC:' prefix", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "AC: The API should return 200 OK.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("uses custom storyPointsFieldId when provided", () => {
+    const { gaps } = checkEnrichmentGaps(
+      {
+        fields: {
+          description: `${"x".repeat(150)}\n- [ ] AC check`,
+          customfield_99999: 8,
+          labels: ["auth"],
+          components: [{ name: "api" }],
+        },
+      },
+      "customfield_99999",
+    );
+    expect(gaps).not.toContain("No story points assigned");
+  });
+
+  it("falls back to customfield_10016 for story points", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: `${"x".repeat(150)}\n- [ ] AC check`,
+        customfield_10016: 3,
+        labels: ["auth"],
+        components: [{ name: "api" }],
+      },
+    });
+    expect(gaps).not.toContain("No story points assigned");
+  });
+
+  it("reports short description gap when description < 100 chars", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: "Short desc",
+        story_points: 3,
+        labels: ["x"],
+        components: [{ name: "y" }],
+      },
+    });
+    expect(gaps).toContain("Description is very short or missing");
+  });
+
+  it("skips AC check when description is empty/missing", () => {
+    const { gaps } = checkEnrichmentGaps({ fields: {} });
+    // Should report description gap but not AC gap (AC check requires descText to be truthy)
+    expect(gaps).toContain("Description is very short or missing");
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects empty labels array", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: { labels: [] },
+    });
+    expect(gaps).toContain("No labels assigned");
+  });
+
+  it("detects empty components array", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: { components: [] },
+    });
+    expect(gaps).toContain("No components assigned");
   });
 });

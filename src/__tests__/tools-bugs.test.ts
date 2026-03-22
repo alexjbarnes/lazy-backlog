@@ -474,6 +474,167 @@ describe("registerBugsTool", () => {
       addCommentSpy.mockRestore();
     });
   });
+
+  // ── Triage with team conventions + rework warnings ─────────────────────
+
+  describe("action=triage (conventions + rework)", () => {
+    it("exercises formatConventions branch when team rules exist (even if no conventions triggered)", async () => {
+      const { server, getTool } = createMockServer();
+      registerBugsTool(server, () => kb);
+      JiraClient.saveSchemaToDb(kb, testSchema);
+
+      // Store a team rule so getTeamRules() returns non-empty
+      kb.upsertTeamRule({
+        category: "naming_convention",
+        rule_key: "prefix",
+        issue_type: "Bug",
+        rule_value: "[BUG]",
+        confidence: 0.8,
+        sample_size: 25,
+      });
+
+      const getIssueSpy = vi
+        .spyOn(JiraClient.prototype, "getIssue")
+        .mockResolvedValue(
+          makeIssueDetail("BP-1", { summary: "Production crash", labels: ["bug"], components: ["api"] }),
+        );
+      const listSprintsSpy = vi
+        .spyOn(JiraClient.prototype, "listSprints")
+        .mockResolvedValue([{ id: 5, name: "Sprint 5", state: "active" }]);
+      const getSprintIssuesSpy = vi
+        .spyOn(JiraClient.prototype, "getSprintIssues")
+        .mockResolvedValue({ issues: [], total: 0 });
+
+      const bugs = getTool("bugs");
+      const result = await bugs({ action: "triage", issueKeys: ["BP-1"] });
+      const text = getText(result);
+      // The triage completes successfully regardless of whether conventions produce output
+      expect(text).toContain("Triage: BP-1");
+      expect(text).toContain("Severity");
+
+      getIssueSpy.mockRestore();
+      listSprintsSpy.mockRestore();
+      getSprintIssuesSpy.mockRestore();
+    });
+
+    it("shows rework risk warning when component has high reopen rate", async () => {
+      const { server, getTool } = createMockServer();
+      registerBugsTool(server, () => kb);
+      JiraClient.saveSchemaToDb(kb, testSchema);
+
+      // Store pattern insights with high rework rate
+      kb.upsertInsight(
+        "patterns",
+        "global",
+        {
+          priorityDistribution: {},
+          labelCooccurrence: [],
+          reworkRates: [{ component: "payments", reopenRate: 0.25, reopenedTickets: 5, totalTickets: 20 }],
+        },
+        20,
+        0.9,
+      );
+
+      const getIssueSpy = vi
+        .spyOn(JiraClient.prototype, "getIssue")
+        .mockResolvedValue(makeIssueDetail("BP-1", { summary: "Payment crash", components: ["payments"] }));
+      const listSprintsSpy = vi
+        .spyOn(JiraClient.prototype, "listSprints")
+        .mockResolvedValue([{ id: 5, name: "Sprint 5", state: "active" }]);
+      const getSprintIssuesSpy = vi
+        .spyOn(JiraClient.prototype, "getSprintIssues")
+        .mockResolvedValue({ issues: [], total: 0 });
+
+      const bugs = getTool("bugs");
+      const result = await bugs({ action: "triage", issueKeys: ["BP-1"] });
+      const text = getText(result);
+      expect(text).toContain("Risk Warning");
+      expect(text).toContain("payments");
+      expect(text).toContain("25%");
+
+      getIssueSpy.mockRestore();
+      listSprintsSpy.mockRestore();
+      getSprintIssuesSpy.mockRestore();
+    });
+
+    it("multi-issue triage shows risky components from rework rates", async () => {
+      const { server, getTool } = createMockServer();
+      registerBugsTool(server, () => kb);
+      JiraClient.saveSchemaToDb(kb, testSchema);
+
+      kb.upsertInsight(
+        "patterns",
+        "global",
+        {
+          priorityDistribution: {},
+          labelCooccurrence: [],
+          reworkRates: [{ component: "auth", reopenRate: 0.2, reopenedTickets: 4, totalTickets: 20 }],
+        },
+        20,
+        0.9,
+      );
+
+      const getIssueSpy = vi
+        .spyOn(JiraClient.prototype, "getIssue")
+        .mockResolvedValueOnce(makeIssueDetail("BP-1", { summary: "Auth crash", components: ["auth"] }))
+        .mockResolvedValueOnce(makeIssueDetail("BP-2", { summary: "Normal bug", components: [] }));
+
+      const bugs = getTool("bugs");
+      const result = await bugs({ action: "triage", issueKeys: ["BP-1", "BP-2"] });
+      const text = getText(result);
+      expect(text).toContain("Risk Warning");
+      expect(text).toContain("auth");
+      expect(text).toContain("20%");
+
+      getIssueSpy.mockRestore();
+    });
+
+    it("auto-comments on incomplete bugs when autoUpdate is true and score < 60", async () => {
+      const { server, getTool } = createMockServer();
+      registerBugsTool(server, () => kb);
+      JiraClient.saveSchemaToDb(kb, testSchema);
+
+      const getIssueSpy = vi
+        .spyOn(JiraClient.prototype, "getIssue")
+        .mockResolvedValue(
+          makeIssueDetail("BP-1", { summary: "Bad bug", description: "short", labels: [], components: [] }),
+        );
+      const addCommentSpy = vi.spyOn(JiraClient.prototype, "addComment").mockResolvedValue(undefined);
+      const addLabelsSpy = vi.spyOn(JiraClient.prototype, "addLabels").mockResolvedValue(undefined);
+      const listSprintsSpy = vi
+        .spyOn(JiraClient.prototype, "listSprints")
+        .mockResolvedValue([{ id: 5, name: "Sprint 5", state: "future" }]);
+
+      const bugs = getTool("bugs");
+      const result = await bugs({ action: "triage", issueKeys: ["BP-1"], autoUpdate: true });
+      const text = getText(result);
+
+      expect(addCommentSpy).toHaveBeenCalledWith("BP-1", expect.stringContaining("incomplete"));
+      expect(addLabelsSpy).toHaveBeenCalledWith("BP-1", ["needs-info"]);
+      expect(text).toContain("needs-info");
+
+      getIssueSpy.mockRestore();
+      addCommentSpy.mockRestore();
+      addLabelsSpy.mockRestore();
+      listSprintsSpy.mockRestore();
+    });
+
+    it("returns error response when triage throws", async () => {
+      const { server, getTool } = createMockServer();
+      registerBugsTool(server, () => kb);
+      JiraClient.saveSchemaToDb(kb, testSchema);
+
+      const getIssueSpy = vi.spyOn(JiraClient.prototype, "getIssue").mockRejectedValue(new Error("Network timeout"));
+
+      const bugs = getTool("bugs");
+      const result = await bugs({ action: "triage", issueKeys: ["BP-1"] });
+      expect(result.isError).toBe(true);
+      expect(getText(result)).toContain("Triage error");
+      expect(getText(result)).toContain("Network timeout");
+
+      getIssueSpy.mockRestore();
+    });
+  });
 });
 
 // ── inferSeverity (unit tests) ────────────────────────────────────────────

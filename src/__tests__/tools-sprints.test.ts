@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { KnowledgeBase } from "../lib/db.js";
-import { JiraClient, type JiraSchema } from "../lib/jira.js";
+import { JiraClient, type JiraSchema, type JiraSprint, type SearchIssue } from "../lib/jira.js";
 import { registerSprintsTool } from "../tools/sprints.js";
 import {
   computeStoryPointTotals,
@@ -1928,8 +1928,6 @@ describe("formatReleaseNotes", () => {
     startDate: "2026-02-01T00:00:00Z",
     endDate: "2026-02-14T00:00:00Z",
     goal: "Ship auth",
-    originBoardId: 1,
-    self: "",
   };
 
   function makeIssue(key: string, summary: string, status: string, type: string, sp?: number): SearchIssue {
