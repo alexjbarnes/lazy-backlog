@@ -1,11 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { computeVelocity } from "../lib/analytics.js";
 import { buildJiraClient, errorResponse, textResponse } from "../lib/config.js";
 import type { KnowledgeBase } from "../lib/db.js";
 import { formatTeamInsights } from "../lib/team-insights.js";
+import { handlePlanAction } from "./insights-plan.js";
 import { loadTeamInsights } from "./issues-helpers.js";
-import { handleVelocityAction } from "./sprints-analytics.js";
 import { handleRetroAction } from "./sprints-retro.js";
+import { fetchSprintData } from "./sprints-utils.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,6 +18,58 @@ type ToolResponse = {
 };
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
+
+function detectAnomalies(kb: KnowledgeBase): string[] {
+  const anomalies: string[] = [];
+  try {
+    const allInsights = kb.getAllInsights();
+    if (allInsights.length === 0) return anomalies;
+
+    // Check ownership: single point of failure (>50% of a component)
+    const ownershipRows = allInsights.filter((r) => r.category === "ownership");
+    for (const row of ownershipRows) {
+      try {
+        const data = JSON.parse(row.data) as {
+          component: string;
+          owners: Array<{ assignee: string; percentage: number }>;
+        };
+        for (const owner of data.owners ?? []) {
+          if (owner.percentage > 50) {
+            anomalies.push(
+              `**${data.component}**: ${owner.assignee} handles ${Math.round(owner.percentage)}% — single point of failure risk`,
+            );
+          }
+        }
+      } catch {
+        /* skip malformed */
+      }
+    }
+
+    // Check estimation: slow issue types (pointsToDaysRatio > 2x average)
+    const estRows = allInsights.filter((r) => r.category === "estimation");
+    const estData: Array<{ issueType: string; pointsToDaysRatio: number }> = [];
+    for (const row of estRows) {
+      try {
+        const data = JSON.parse(row.data) as { issueType: string; pointsToDaysRatio: number };
+        if (data.pointsToDaysRatio > 0) estData.push(data);
+      } catch {
+        /* skip */
+      }
+    }
+    if (estData.length > 1) {
+      const avgRatio = estData.reduce((s, d) => s + d.pointsToDaysRatio, 0) / estData.length;
+      for (const d of estData) {
+        if (d.pointsToDaysRatio > avgRatio * 2) {
+          const multiplier = Math.round((d.pointsToDaysRatio / avgRatio) * 10) / 10;
+          anomalies.push(`**${d.issueType}**: ${multiplier}x avg cycle time per point — slow issue type`);
+        }
+      }
+    }
+  } catch {
+    /* graceful degradation */
+  }
+  return anomalies;
+}
 
 function handleTeamProfile(kb: KnowledgeBase): ToolResponse {
   const insights = loadTeamInsights(kb);
@@ -58,13 +113,20 @@ function handleTeamProfile(kb: KnowledgeBase): ToolResponse {
     }
   }
 
+  const anomalies = detectAnomalies(kb);
+  if (anomalies.length > 0) {
+    lines.push("\n## Anomalies\n");
+    for (const a of anomalies) lines.push(`- ${a}`);
+    lines.push("");
+  }
+
   return textResponse(lines.join("\n"));
 }
 
 async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBase): Promise<ToolResponse> {
   if (!params.epicKey) return errorResponse("epicKey is required for 'epic-progress' action.");
 
-  const { jira } = buildJiraClient(kb);
+  const { jira, config } = buildJiraClient(kb);
   const issues = await jira.getEpicIssues(params.epicKey);
   const spField = jira.storyPointsFieldId;
 
@@ -114,7 +176,92 @@ async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBas
     }
   }
 
-  return textResponse(out);
+  // Forecast based on velocity
+  if (remainingPoints > 0) {
+    const boardId = config.jiraBoardId ?? "";
+    if (boardId) {
+      try {
+        const sprintData = await fetchSprintData(jira, boardId, 5);
+        if (sprintData.length > 0) {
+          const velocity = computeVelocity(sprintData);
+          if (velocity.average > 0) {
+            const sprintsRemaining = Math.ceil(remainingPoints / velocity.average);
+            const weeksRemaining = sprintsRemaining * 2;
+            const estDate = new Date();
+            estDate.setDate(estDate.getDate() + weeksRemaining * 7);
+            const dateStr = estDate.toISOString().slice(0, 10);
+
+            out += `\n## Forecast\n`;
+            out += `**At current velocity (~${Math.round(velocity.average)} SP/sprint), estimated completion in ${sprintsRemaining} sprint${sprintsRemaining === 1 ? "" : "s"} (~${dateStr})**\n`;
+
+            const stddev = Math.sqrt(
+              velocity.sprints.reduce((sum, s) => sum + (s.completed - velocity.average) ** 2, 0) /
+                velocity.sprints.length,
+            );
+            if (velocity.trendSlope < -1 || stddev > velocity.average * 0.3) {
+              out += "\n> Warning: High uncertainty -- velocity is unstable\n";
+            }
+          }
+        }
+      } catch {
+        // Velocity data unavailable — skip forecast
+      }
+    }
+  }
+
+  // Blocker chain detection: check first 10 non-done issues for blocking links
+  try {
+    const epicKeys = new Set(issues.map((i) => i.key));
+    const blockers: Array<{ blocker: string; blocked: string[]; blockedSP: number }> = [];
+    const toCheck = remaining.slice(0, 10);
+
+    for (const r of toCheck) {
+      try {
+        const links = await jira.getIssueLinks(r.key);
+        const blockedKeys = links
+          .filter((l) => l.direction === "outward" && /block/i.test(l.type) && epicKeys.has(l.linkedIssue.key))
+          .map((l) => l.linkedIssue.key);
+
+        if (blockedKeys.length > 0) {
+          let blockedSP = 0;
+          for (const bk of blockedKeys) {
+            const blocked = issues.find((i) => i.key === bk);
+            if (blocked) {
+              const f = blocked.fields as Record<string, unknown>;
+              blockedSP +=
+                (spField ? (f[spField] as number | undefined) : undefined) ??
+                (f.story_points as number | undefined) ??
+                (f.customfield_10016 as number | undefined) ??
+                0;
+            }
+          }
+          blockers.push({ blocker: r.key, blocked: blockedKeys, blockedSP });
+        }
+      } catch {
+        /* skip if links unavailable */
+      }
+    }
+
+    if (blockers.length > 0) {
+      out += `\n## Blockers\n`;
+      for (const b of blockers) {
+        const status = remaining.find((r) => r.key === b.blocker)?.status ?? "Unknown";
+        out += `- **${b.blocker}** (${status}) blocks ${b.blocked.join(", ")}`;
+        if (b.blockedSP > 0) out += ` (${b.blockedSP} SP)`;
+        out += `\n`;
+      }
+      const totalBlockedSP = blockers.reduce((s, b) => s + b.blockedSP, 0);
+      if (totalBlockedSP > 0) {
+        out += `\nResolving blockers unblocks **${totalBlockedSP} SP** on the critical path.\n`;
+      }
+    }
+  } catch {
+    /* graceful: skip blocker detection if links unavailable */
+  }
+
+  const behindSchedule = remainingPoints > completedPoints;
+  const suggestions = buildSuggestions("insights", "epic-progress", { behindSchedule });
+  return textResponse(out + suggestions);
 }
 
 // ── Tool Registration ────────────────────────────────────────────────────────
@@ -127,22 +274,18 @@ export function registerInsightsTool(server: McpServer, getKb: () => KnowledgeBa
         "Team intelligence and analytics. Use this tool for understanding team performance, patterns, and progress. " +
         "Actions: 'team-profile' — view stored team intelligence from setup: who owns what components, estimation patterns, " +
         "description templates, rework rates, and conventions (zero API calls — reads local analysis). " +
-        "'epic-progress' — show epic completion stats (issues, story points, remaining work). " +
-        "'velocity' — team velocity trends across past sprints. " +
-        "'retro' — sprint retrospective data (scope creep, cycle time, time-in-status, carry-over).",
+        "'epic-progress' — show epic completion stats with velocity-based forecast. " +
+        "'retro' — sprint retrospective data (scope creep, cycle time, workload distribution, carry-over). " +
+        "'plan' — sprint planning assistant: velocity, carryover, capacity budget, recommended items from backlog.",
       inputSchema: z.object({
-        action: z.enum(["team-profile", "epic-progress", "velocity", "retro"]),
+        action: z.enum(["team-profile", "epic-progress", "retro", "plan"]),
         epicKey: z.string().optional().describe("[epic-progress] Epic issue key, e.g. 'BP-100'"),
         sprintId: z.string().optional().describe("[retro] Sprint ID. Omit to use most recent closed sprint"),
         sprintCount: z
           .number()
           .default(5)
           .optional()
-          .describe("[velocity, retro] Number of past closed sprints to analyze"),
-        trendMetrics: z
-          .array(z.enum(["velocity", "bugRate", "scopeChange"]))
-          .optional()
-          .describe("[velocity] Metrics to compute: velocity (story points), bugRate, scopeChange"),
+          .describe("[retro, plan] Number of past closed sprints to analyze"),
       }),
     },
     async (params) => {
@@ -155,11 +298,8 @@ export function registerInsightsTool(server: McpServer, getKb: () => KnowledgeBa
         case "epic-progress":
           return handleEpicProgress(params, kb);
 
-        case "velocity": {
-          const { jira, config } = buildJiraClient(kb);
-          const boardId = config.jiraBoardId ?? "";
-          return handleVelocityAction(params, jira, boardId);
-        }
+        case "plan":
+          return handlePlanAction(params, kb);
 
         case "retro": {
           const { jira, config } = buildJiraClient(kb);

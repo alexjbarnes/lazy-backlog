@@ -3,6 +3,7 @@ import { errorResponse, textResponse } from "../lib/config.js";
 import { groupBy } from "../lib/db.js";
 import type { JiraClient, SearchIssue } from "../lib/jira.js";
 import { fetchSprintData, getStoryPoints } from "./sprints-utils.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ──
 
@@ -266,6 +267,63 @@ function formatTimeInStatus(completed: SearchIssue[], cycleData: CycleDataItem[]
   return out;
 }
 
+function formatVelocityTrend(velocity: {
+  sprints: { sprintName: string; committed: number; completed: number; carryOver: number }[];
+  trend: string;
+  trendSlope: number;
+}): string {
+  if (velocity.sprints.length === 0) return "";
+  let out = "\n## Velocity Trend\n\n";
+  out += "| Sprint | Committed | Completed | Carry-Over |\n";
+  out += "|--------|-----------|-----------|------------|\n";
+  for (const s of velocity.sprints) {
+    out += `| ${s.sprintName} | ${s.committed} SP | ${s.completed} SP | ${s.carryOver} SP |\n`;
+  }
+  out += `\nTrend: ${velocity.trend} (slope: ${velocity.trendSlope.toFixed(2)} SP/sprint)\n`;
+  return out;
+}
+
+function formatEstimationAccuracy(completedSP: number, totalSP: number, velocityAvg: number): string {
+  const deliveryRate = totalSP > 0 ? Math.round((completedSP / totalSP) * 100) : 0;
+  let out = "\n## Estimation Accuracy\n\n";
+  out += `This sprint: ${completedSP}/${totalSP} = ${deliveryRate}% delivery rate\n`;
+  if (velocityAvg > 0) {
+    const diff = completedSP - velocityAvg;
+    const label = diff >= 0 ? "above" : "below";
+    out += `Compared to average velocity (${Math.round(velocityAvg)} SP): ${Math.abs(Math.round(diff))} SP ${label} average\n`;
+  }
+  return out;
+}
+
+function formatWorkloadDistribution(completed: SearchIssue[], spFieldId: string | undefined): string {
+  const assigneeMap = new Map<string, { sp: number; issues: number }>();
+  for (const issue of completed) {
+    const assignee = (issue.fields as Record<string, unknown>).assignee
+      ? (((issue.fields as Record<string, unknown>).assignee as { displayName?: string })?.displayName ?? "Unassigned")
+      : "Unassigned";
+    const sp = getStoryPoints(issue.fields, spFieldId);
+    const existing = assigneeMap.get(assignee) ?? { sp: 0, issues: 0 };
+    existing.sp += sp;
+    existing.issues += 1;
+    assigneeMap.set(assignee, existing);
+  }
+  if (assigneeMap.size <= 1) return "";
+
+  let out = "\n## Workload Distribution\n\n";
+  out += "| Assignee | Completed SP | Issues |\n";
+  out += "|----------|-------------|--------|\n";
+  const entries = [...assigneeMap.entries()];
+  const spValues = entries.map(([, d]) => d.sp);
+  const mean = spValues.reduce((a, b) => a + b, 0) / spValues.length;
+
+  for (const [name, data] of entries) {
+    out += `| ${name} | ${data.sp} | ${data.issues} |\n`;
+  }
+  const imbalanced = entries.some(([, d]) => mean > 0 && (d.sp > mean * 2 || d.sp < mean * 0.5));
+  out += `\nBalance: ${imbalanced ? "imbalanced" : "even"}\n`;
+  return out;
+}
+
 // ── Main handler ──
 
 /** Handle the 'retro' action (comprehensive retrospective data pack). */
@@ -310,16 +368,44 @@ export async function handleRetroAction(
   const bugCount = issues.filter((i) => (i.fields.issuetype?.name ?? "").toLowerCase() === "bug").length;
   const bugRatio = issues.length > 0 ? Math.round((bugCount / issues.length) * 100) : 0;
 
+  // Sprint-over-sprint comparison: compare this sprint to trailing 3-sprint average
+  let comparisonSection = "";
+  if (velocity.sprints.length > 1) {
+    const trailing = velocity.sprints.slice(1, 4); // skip index 0 (current sprint)
+    if (trailing.length > 0) {
+      const avgCompleted = Math.round(trailing.reduce((s, sp) => s + sp.completed, 0) / trailing.length);
+      const avgCarryOver = Math.round((trailing.reduce((s, sp) => s + sp.carryOver, 0) / trailing.length) * 10) / 10;
+      const currentCompleted = velocity.sprints[0]?.completed ?? completedSP;
+      const currentCarryOver = carryOver.length;
+
+      const velDelta = avgCompleted > 0 ? Math.round(((currentCompleted - avgCompleted) / avgCompleted) * 100) : 0;
+      const carryDelta = avgCarryOver > 0 ? Math.round(((currentCarryOver - avgCarryOver) / avgCarryOver) * 100) : 0;
+
+      // Bug ratio comparison from historical issues (approximate from velocity data)
+      const trend = velDelta > 5 ? "improving" : velDelta < -5 ? "declining" : "stable";
+
+      comparisonSection = `\n## vs ${trailing.length}-Sprint Average\n\n`;
+      comparisonSection += `- **Velocity:** ${velDelta >= 0 ? "+" : ""}${velDelta}% (${currentCompleted} vs ${avgCompleted} SP)\n`;
+      comparisonSection += `- **Carry-over:** ${carryDelta >= 0 ? "+" : ""}${carryDelta}% (${currentCarryOver} vs ${avgCarryOver})\n`;
+      comparisonSection += `- **Trend:** ${trend}\n`;
+    }
+  }
+
   const out =
     formatHeader(sprint) +
     formatHealthSection(health, velocity, completionRate, completedSP, carryOver.length, bugRatio) +
+    formatVelocityTrend(velocity) +
+    formatEstimationAccuracy(completedSP, totalSP, velocity.average) +
+    comparisonSection +
     formatCycleTimeSection(cycleData) +
     formatSummarySection(issues.length, completed.length, carryOver.length, totalSP, completedSP, completionRate) +
     formatCompletedByType(completedByType) +
     formatCarryOver(carryOver) +
+    formatWorkloadDistribution(completed, spFieldId) +
     formatIssueBreakdown(issues) +
     formatScopeCreep(issues, sprint.startDate) +
     formatTimeInStatus(completed, cycleData);
 
-  return textResponse(out);
+  const suggestions = buildSuggestions("insights", "retro", {});
+  return textResponse(out + suggestions);
 }

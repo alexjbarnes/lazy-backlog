@@ -8,6 +8,7 @@ import { Spider } from "../lib/indexer.js";
 import { JiraClient, type JiraSchema } from "../lib/jira.js";
 import { analyzeBacklog } from "../lib/team-rules.js";
 import { learnTeamConventions } from "./configure-helpers.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,9 +153,30 @@ function handleGet(kb: KnowledgeBase): ToolResponse {
       ? `${allInsights.length} insights stored — use insights action='team-profile' to view`
       : "Not analyzed";
 
+  // Setup freshness: check last analysis date and stale pages
+  const latestAnalysis = kb.getLatestAnalysis();
+  let freshnessLine = "";
+  if (latestAnalysis) {
+    const analyzedDate = new Date(latestAnalysis.analyzed_at);
+    const daysAgo = Math.round((Date.now() - analyzedDate.getTime()) / 86_400_000);
+    freshnessLine = `Last setup: ${analyzedDate.toISOString().slice(0, 10)} (${daysAgo}d ago). `;
+    if (daysAgo > 30) freshnessLine += "Consider re-running `configure setup` to refresh team patterns.";
+  }
+
+  let setupSummary = "";
+  if (teamRules.length > 0 && stats.total > 0) {
+    setupSummary = `**Setup Status:** Team rules learned from ${latestAnalysis?.tickets_fetched ?? "?"} tickets. KB: ${stats.total} pages indexed. ${freshnessLine}`;
+  } else if (teamRules.length === 0) {
+    setupSummary = "**Setup Status:** Team rules not yet configured. Run `configure setup` to learn team patterns.";
+  } else if (stats.total === 0) {
+    setupSummary =
+      "**Setup Status:** Team rules available but KB is empty. Run `confluence spider` to index documentation.";
+  }
+
   lines.push(
     "",
     "## Setup Status",
+    setupSummary,
     `**Jira Schema:** ${schemaStatus}`,
     `**Confluence KB:** ${kbStatus}`,
     `**Team Conventions:** ${rulesStatus}`,
@@ -296,7 +318,8 @@ async function handleSetup(
   }
 
   output.push("---\nSetup complete. You can now use **issues**, **sprints**, **plan**, and **confluence** tools.");
-  return textResponse(output.join("\n"));
+  const suggestions = buildSuggestions("configure", "setup", {});
+  return textResponse(output.join("\n") + suggestions);
 }
 
 // ── Tool Registration ────────────────────────────────────────────────────────

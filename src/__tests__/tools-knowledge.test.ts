@@ -31,8 +31,6 @@ function makePage(overrides: Partial<IndexedPage> = {}): IndexedPage {
 
 const defaults = {
   limit: 5,
-  summarize: false,
-  staleDays: 90,
 };
 
 // ── formatSummaryLine ──────────────────────────────────────────────────────
@@ -273,7 +271,7 @@ describe("registerKnowledgeTool", () => {
         action: "search",
         ...defaults,
       });
-      expect(result.content[0]?.text).toContain("Total: 1");
+      expect(result.content[0]?.text).toContain("Total pages");
       expect(result.content[0]?.text).toContain("adr");
     });
 
@@ -285,36 +283,6 @@ describe("registerKnowledgeTool", () => {
       const result = await tool({
         action: "search",
         ...defaults,
-      });
-      expect(result.content[0]?.text).toContain("empty");
-    });
-
-    it("returns context summary when summarize=true", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      kb.upsertPage(makePage({ id: "a1", title: "ADR-001", page_type: "adr", content: "Use PostgreSQL" }));
-      kb.upsertPage(makePage({ id: "d1", title: "Auth Design", page_type: "design", content: "OAuth2 design" }));
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "search",
-        ...defaults,
-        summarize: true,
-      });
-      expect(result.content[0]?.text).toContain("Project Context");
-      expect(result.content[0]?.text).toContain("ADRs");
-    });
-
-    it("returns empty message when summarize=true on empty KB (no query falls through to stats)", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "search",
-        ...defaults,
-        summarize: true,
       });
       expect(result.content[0]?.text).toContain("empty");
     });
@@ -334,7 +302,7 @@ describe("registerKnowledgeTool", () => {
         action: "stats",
         ...defaults,
       });
-      expect(result.content[0]?.text).toContain("Total: 1");
+      expect(result.content[0]?.text).toContain("Total pages");
       expect(result.content[0]?.text).toContain("adr");
     });
 
@@ -363,11 +331,11 @@ describe("registerKnowledgeTool", () => {
         ...defaults,
       });
       const text = result.content[0]?.text ?? "";
-      expect(text).toContain("Total: 2");
+      expect(text).toContain("Total pages");
       expect(text).toContain("By source:");
     });
 
-    it("returns context summary when summarize=true", async () => {
+    it("includes context summary with ADRs in stats", async () => {
       const { server, getTool } = createMockServer();
       registerKnowledgeTool(server, () => kb);
 
@@ -377,10 +345,57 @@ describe("registerKnowledgeTool", () => {
       const result = await tool({
         action: "stats",
         ...defaults,
-        summarize: true,
       });
-      expect(result.content[0]?.text).toContain("Project Context");
+      expect(result.content[0]?.text).toContain("Context Summary");
       expect(result.content[0]?.text).toContain("ADRs");
+    });
+
+    it("includes KB health indicator", async () => {
+      const { server, getTool } = createMockServer();
+      registerKnowledgeTool(server, () => kb);
+
+      kb.upsertPage(makePage({ id: "p1", page_type: "adr", updated_at: new Date().toISOString() }));
+
+      const tool = getTool("knowledge");
+      const result = await tool({
+        action: "stats",
+        ...defaults,
+      });
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("KB Health:");
+      expect(text).toMatch(/healthy|needs-attention|stale/);
+    });
+
+    it("shows stale docs section for old pages", async () => {
+      const { server, getTool } = createMockServer();
+      registerKnowledgeTool(server, () => kb);
+
+      kb.upsertPage(makePage({ id: "old1", title: "Old Page", updated_at: "2020-01-01T00:00:00Z" }));
+
+      const tool = getTool("knowledge");
+      const result = await tool({
+        action: "stats",
+        ...defaults,
+      });
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("Stale Docs");
+      expect(text).toContain("Old Page");
+    });
+
+    it("shows recent changes section", async () => {
+      const { server, getTool } = createMockServer();
+      registerKnowledgeTool(server, () => kb);
+
+      kb.upsertPage(makePage({ id: "p1", title: "Fresh Page", indexed_at: new Date().toISOString() }));
+
+      const tool = getTool("knowledge");
+      const result = await tool({
+        action: "stats",
+        ...defaults,
+      });
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("Recent Changes");
+      expect(text).toContain("Fresh Page");
     });
   });
 
@@ -476,85 +491,6 @@ describe("registerKnowledgeTool", () => {
       const tool = getTool("knowledge");
       const result = await tool({
         action: "get-page",
-        ...defaults,
-      });
-      expect(result.isError).toBe(true);
-    });
-  });
-
-  // ── stale-docs ─────────────────────────────────────────────────────────
-
-  describe("action=stale-docs", () => {
-    it("returns stale pages", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      kb.upsertPage(makePage({ id: "old1", title: "Old Page", updated_at: "2020-01-01T00:00:00Z" }));
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "stale-docs",
-        ...defaults,
-        staleDays: 30,
-      });
-      expect(result.content[0]?.text).toContain("Old Page");
-      expect(result.content[0]?.text).toContain("stale");
-    });
-
-    it("returns empty when all pages are fresh", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      kb.upsertPage(makePage({ id: "fresh1", title: "Fresh Page", updated_at: new Date().toISOString() }));
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "stale-docs",
-        ...defaults,
-      });
-      expect(result.content[0]?.text).toContain("No pages older than");
-    });
-  });
-
-  // ── what-changed ───────────────────────────────────────────────────────
-
-  describe("action=what-changed", () => {
-    it("returns recently changed pages", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      kb.upsertPage(makePage({ id: "p1", title: "Recently Changed", indexed_at: new Date().toISOString() }));
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "what-changed",
-        since: "2020-01-01T00:00:00Z",
-        ...defaults,
-      });
-      expect(result.content[0]?.text).toContain("Recently Changed");
-    });
-
-    it("returns empty when since finds nothing", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      const tool = getTool("knowledge");
-      const futureDate = new Date(Date.now() + 86400000).toISOString();
-      const result = await tool({
-        action: "what-changed",
-        since: futureDate,
-        ...defaults,
-      });
-      expect(result.content[0]?.text).toContain("No changes");
-    });
-
-    it("returns error when since is missing", async () => {
-      const { server, getTool } = createMockServer();
-      registerKnowledgeTool(server, () => kb);
-
-      const tool = getTool("knowledge");
-      const result = await tool({
-        action: "what-changed",
         ...defaults,
       });
       expect(result.isError).toBe(true);

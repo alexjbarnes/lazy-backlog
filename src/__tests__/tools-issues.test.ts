@@ -10,6 +10,7 @@ import {
   boolPreprocess,
   buildKbContextSection,
   buildSchemaGuidance,
+  checkEnrichmentGaps,
   extractKeywords,
   formatBoardInfo,
   formatFieldsList,
@@ -605,7 +606,7 @@ describe("registerIssuesTool", () => {
     });
   });
 
-  describe("action=bulk-create", () => {
+  describe("action=create (bulk via tickets array)", () => {
     it("returns preview when confirmed is not set", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
@@ -613,7 +614,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "Ticket one",
@@ -639,31 +640,31 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [{ summary: "Bulk ticket", description: "## Context\nTest" }],
       });
       expect(result.content[0]?.text).toContain("BP-300");
     });
 
-    it("returns error when tickets array is missing", async () => {
+    it("returns error when create has no summary/tickets/epicKey", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
 
       const issues = getTool("issues");
-      const result = await issues({ action: "bulk-create" });
+      const result = await issues({ action: "create" });
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain("tickets array is required");
+      expect(result.content[0]?.text).toContain("summary is required");
     });
 
-    it("returns error when tickets array is empty", async () => {
+    it("returns error when tickets array is empty (falls through to create)", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
 
       const issues = getTool("issues");
-      const result = await issues({ action: "bulk-create", tickets: [] });
+      const result = await issues({ action: "create", tickets: [] });
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain("tickets array is required");
+      expect(result.content[0]?.text).toContain("summary is required");
     });
 
     it("creates multiple tickets and reports results", async () => {
@@ -681,7 +682,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [
           {
@@ -721,7 +722,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [
           {
@@ -750,7 +751,7 @@ describe("registerIssuesTool", () => {
       batchSpy.mockRestore();
     });
 
-    it("confirmed bulk-create returns error when project key is missing", async () => {
+    it("confirmed bulk create returns error when project key is missing", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
       JiraClient.saveSchemaToDb(kb, testSchema);
@@ -762,7 +763,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [
           {
@@ -786,7 +787,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "Full ticket",
@@ -816,7 +817,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "No desc ticket",
@@ -838,7 +839,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "Only one",
@@ -861,7 +862,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "First",
@@ -895,7 +896,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [
           {
@@ -926,7 +927,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       await issues({
-        action: "bulk-create",
+        action: "create",
         confirmed: true,
         tickets: [
           {
@@ -958,7 +959,7 @@ describe("registerIssuesTool", () => {
 
       const issues = getTool("issues");
       const result = await issues({
-        action: "bulk-create",
+        action: "create",
         tickets: [
           {
             summary: "No project key",
@@ -1291,7 +1292,7 @@ describe("registerIssuesTool", () => {
     });
   });
 
-  // ── Triage actions (find-bugs, assess, triage) ─────────────────────────────
+  // ── Triage actions (moved to tools-bugs.test.ts) ───────────────────────────
 
   function getText(result: { content: { type: string; text: string }[] }): string {
     return (result.content[0] as { type: string; text: string }).text;
@@ -1711,9 +1712,9 @@ describe("registerIssuesTool", () => {
     });
   });
 
-  // ── action=decompose — branches (lines 339, 373-376) ─────────────────────
+  // ── action=create (decompose via epicKey) ────────────────────────────────
 
-  describe("action=decompose", () => {
+  describe("action=create (decompose via epicKey)", () => {
     it("shows 'None found' when epic has no children (line 339)", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
@@ -1730,7 +1731,7 @@ describe("registerIssuesTool", () => {
       });
 
       const issues = getTool("issues");
-      const result = await issues({ action: "decompose", epicKey: "BP-100" });
+      const result = await issues({ action: "create", epicKey: "BP-100" });
       expect(result.isError).toBeUndefined();
       const text = getText(result);
       expect(text).toContain("Epic Decomposition: BP-100");
@@ -1778,7 +1779,7 @@ describe("registerIssuesTool", () => {
       });
 
       const issues = getTool("issues");
-      const result = await issues({ action: "decompose", epicKey: "BP-100" });
+      const result = await issues({ action: "create", epicKey: "BP-100" });
       expect(result.isError).toBeUndefined();
       const text = getText(result);
       expect(text).toContain("Existing Stories (2/2)");
@@ -1803,7 +1804,7 @@ describe("registerIssuesTool", () => {
         .mockRejectedValue(new Error("Epic does not exist"));
 
       const issues = getTool("issues");
-      const result = await issues({ action: "decompose", epicKey: "BP-BAD" });
+      const result = await issues({ action: "create", epicKey: "BP-BAD" });
       expect(result.isError).toBe(true);
       expect(getText(result)).toContain("Failed to decompose BP-BAD");
       expect(getText(result)).toContain("Epic does not exist");
@@ -1811,15 +1812,16 @@ describe("registerIssuesTool", () => {
       getIssueSpy.mockRestore();
     });
 
-    it("returns error when epicKey is missing for decompose", async () => {
+    it("returns error when epicKey is missing for decompose (falls to create)", async () => {
       const { server, getTool } = createMockServer();
       registerIssuesTool(server, () => kb);
       JiraClient.saveSchemaToDb(kb, testSchema);
 
       const issues = getTool("issues");
-      const result = await issues({ action: "decompose" });
+      // With no summary and no epicKey, falls through to handleCreateAction
+      const result = await issues({ action: "create" });
       expect(result.isError).toBe(true);
-      expect(getText(result)).toContain("epicKey is required");
+      expect(getText(result)).toContain("summary is required");
     });
   });
 
@@ -2248,5 +2250,154 @@ describe("issues-helpers", () => {
       expect(result).toContain("Page 24");
       expect(result).not.toContain("Page 25");
     });
+  });
+});
+
+// ── checkEnrichmentGaps (unit tests) ────────────────────────────────────────
+
+describe("checkEnrichmentGaps", () => {
+  it("reports all gaps for a completely empty issue", () => {
+    const { gaps, suggestions } = checkEnrichmentGaps({ fields: {} });
+    expect(gaps).toContain("Description is very short or missing");
+    expect(gaps).toContain("No story points assigned");
+    expect(gaps).toContain("No labels assigned");
+    expect(gaps).toContain("No components assigned");
+    expect(suggestions.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("reports no gaps for a fully populated issue", () => {
+    const longDesc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "It includes acceptance criteria.\n- [ ] First criterion\n- [ ] Second criterion";
+    const { gaps, suggestions } = checkEnrichmentGaps({
+      fields: {
+        description: longDesc,
+        story_points: 5,
+        labels: ["tech-debt"],
+        components: [{ name: "frontend" }],
+      },
+    });
+    expect(gaps).toHaveLength(0);
+    expect(suggestions).toHaveLength(0);
+  });
+
+  it("detects missing acceptance criteria in description", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "It explains the requirements but has no AC checkboxes or AC heading.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via checkbox pattern", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "Requirements:\n- [ ] Must handle edge case\n- [x] Must validate input";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via 'Acceptance Criteria' heading", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "## Acceptance Criteria\nThe system should respond within 200ms.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects AC via 'AC:' prefix", () => {
+    const desc =
+      "This is a very detailed description that is definitely longer than one hundred characters. " +
+      "AC: The API should return 200 OK.";
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: desc,
+        story_points: 3,
+        labels: ["infra"],
+        components: [{ name: "backend" }],
+      },
+    });
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("uses custom storyPointsFieldId when provided", () => {
+    const { gaps } = checkEnrichmentGaps(
+      {
+        fields: {
+          description: `${"x".repeat(150)}\n- [ ] AC check`,
+          customfield_99999: 8,
+          labels: ["auth"],
+          components: [{ name: "api" }],
+        },
+      },
+      "customfield_99999",
+    );
+    expect(gaps).not.toContain("No story points assigned");
+  });
+
+  it("falls back to customfield_10016 for story points", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: `${"x".repeat(150)}\n- [ ] AC check`,
+        customfield_10016: 3,
+        labels: ["auth"],
+        components: [{ name: "api" }],
+      },
+    });
+    expect(gaps).not.toContain("No story points assigned");
+  });
+
+  it("reports short description gap when description < 100 chars", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: {
+        description: "Short desc",
+        story_points: 3,
+        labels: ["x"],
+        components: [{ name: "y" }],
+      },
+    });
+    expect(gaps).toContain("Description is very short or missing");
+  });
+
+  it("skips AC check when description is empty/missing", () => {
+    const { gaps } = checkEnrichmentGaps({ fields: {} });
+    // Should report description gap but not AC gap (AC check requires descText to be truthy)
+    expect(gaps).toContain("Description is very short or missing");
+    expect(gaps).not.toContain("No acceptance criteria found");
+  });
+
+  it("detects empty labels array", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: { labels: [] },
+    });
+    expect(gaps).toContain("No labels assigned");
+  });
+
+  it("detects empty components array", () => {
+    const { gaps } = checkEnrichmentGaps({
+      fields: { components: [] },
+    });
+    expect(gaps).toContain("No components assigned");
   });
 });
