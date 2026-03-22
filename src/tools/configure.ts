@@ -8,6 +8,7 @@ import { Spider } from "../lib/indexer.js";
 import { JiraClient, type JiraSchema } from "../lib/jira.js";
 import { analyzeBacklog } from "../lib/team-rules.js";
 import { learnTeamConventions } from "./configure-helpers.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -296,7 +297,8 @@ async function handleSetup(
   }
 
   output.push("---\nSetup complete. You can now use **issues**, **sprints**, **plan**, and **confluence** tools.");
-  return textResponse(output.join("\n"));
+  const suggestions = buildSuggestions("configure", "setup", {});
+  return textResponse(output.join("\n") + suggestions);
 }
 
 // ── Tool Registration ────────────────────────────────────────────────────────

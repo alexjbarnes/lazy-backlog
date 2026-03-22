@@ -6,6 +6,7 @@ import type { PatternInsight } from "../lib/team-insights-types.js";
 import { DEFAULT_RULES, mergeWithDefaults } from "../lib/team-rules.js";
 import { evaluateConventions, formatConventionsSection } from "../lib/team-rules-format.js";
 import { assessCompleteness, inferSeverity, type ToolResponse } from "./bugs.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Rework risk helpers ─────────────────────────────────────────────────────
 
@@ -324,11 +325,13 @@ export async function handleTriage(
     if (params.issueKeys.length === 1) {
       const issueKey = params.issueKeys[0] as string;
       const out = await triageSingleIssue(issueKey, params, jira, config, kb);
-      return textResponse(out);
+      const suggestions = buildSuggestions("bugs", "triage", { triageCount: 1 });
+      return textResponse(out + suggestions);
     }
 
     const out = await triageReport(params.issueKeys, jira, kb);
-    return textResponse(out);
+    const suggestions = buildSuggestions("bugs", "triage", { triageCount: params.issueKeys.length });
+    return textResponse(out + suggestions);
   } catch (err: unknown) {
     return errorResponse(`Triage error: ${err instanceof Error ? err.message : String(err)}`);
   }

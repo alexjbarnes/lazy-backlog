@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorResponse, formatLabels, textResponse } from "../lib/config.js";
 import type { KnowledgeBase, PageSummary } from "../lib/db.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -199,7 +200,8 @@ function handleStats(
   }
   out += `\n## KB Health: **${health}** (${freshPct}% of pages updated within ${STALE_CUTOFF_DAYS} days)\n`;
 
-  return textResponse(out);
+  const suggestions = buildSuggestions("knowledge", "stats", { staleCount: stalePages.length });
+  return textResponse(out + suggestions);
 }
 
 function handleGetPage(params: { pageId?: string }, kb: KnowledgeBase): ToolResponse {

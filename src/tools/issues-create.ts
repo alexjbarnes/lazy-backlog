@@ -18,6 +18,7 @@ import {
   retrieveKbContext,
 } from "./issues-helpers.js";
 import { buildPreviewCard, type PreviewData } from "./preview-builder.js";
+import { buildSuggestions } from "./suggestions.js";
 
 // ── Shared Helpers ───────────────────────────────────────────────────────────
 
@@ -168,8 +169,9 @@ async function executeCreate(
     namedFields: params.namedFields,
   };
   const created = await jira.createIssue(input);
+  const suggestions = buildSuggestions("issues", "create", { confirmed: true });
   return textResponse(
-    `Created **${created.key}** — ${config.siteUrl}/browse/${created.key}\n\nSummary: ${params.summary}`,
+    `Created **${created.key}** — ${config.siteUrl}/browse/${created.key}\n\nSummary: ${params.summary}${suggestions}`,
   );
 }
 

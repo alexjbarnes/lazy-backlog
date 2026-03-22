@@ -237,5 +237,7 @@ export async function handlePlanAction(params: { sprintCount?: number }, kb: Kno
   out += formatStretchSection(stretch);
   out += formatWorkloadSection(assigneeWorkload);
 
-  return textResponse(out);
+  const { buildSuggestions } = await import("./suggestions.js");
+  const suggestions = buildSuggestions("insights", "plan", {});
+  return textResponse(out + suggestions);
 }

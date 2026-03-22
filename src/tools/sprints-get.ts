@@ -1,4 +1,5 @@
 import { errorResponse, textResponse } from "../lib/config.js";
+import { buildSuggestions } from "./suggestions.js";
 import { groupBy } from "../lib/db.js";
 import type { ChangelogEntry, JiraClient, JiraSprint, SearchIssue } from "../lib/jira.js";
 import {
@@ -279,11 +280,20 @@ export async function handleSmartGetAction(
       return errorResponse(err instanceof Error ? err.message : String(err));
     }
     const out = await buildStandupDigest(sprint, issues, sinceDate, jira);
-    return textResponse(out);
+    const suggestions = buildSuggestions("sprints", "get", { blockerCount: 0, healthScore: 100, carryoverCount: 0, isClosedSprint: false });
+    return textResponse(out + suggestions);
   }
 
   // Full dashboard
   const staleDays = params.staleDays ?? 3;
   const out = await buildActiveDashboard(sprint, issues, spFieldId, staleDays, jira, boardId);
-  return textResponse(out);
+  const bp = computeSPBreakdown(issues, spFieldId);
+  const blockerCount = bp.blockerCount;
+  const healthScore = bp.totalSP > 0 ? Math.round((bp.doneSP / bp.totalSP) * 100) : 100;
+  const carryoverCount = issues.filter((i) => {
+    const s = (i.fields.status?.name ?? "").toLowerCase();
+    return s !== "done" && s !== "closed" && s !== "resolved";
+  }).length;
+  const suggestions = buildSuggestions("sprints", "get", { blockerCount, healthScore, carryoverCount, isClosedSprint: false });
+  return textResponse(out + suggestions);
 }
