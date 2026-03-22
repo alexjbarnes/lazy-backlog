@@ -266,6 +266,63 @@ function formatTimeInStatus(completed: SearchIssue[], cycleData: CycleDataItem[]
   return out;
 }
 
+function formatVelocityTrend(velocity: {
+  sprints: { sprintName: string; committed: number; completed: number; carryOver: number }[];
+  trend: string;
+  trendSlope: number;
+}): string {
+  if (velocity.sprints.length === 0) return "";
+  let out = "\n## Velocity Trend\n\n";
+  out += "| Sprint | Committed | Completed | Carry-Over |\n";
+  out += "|--------|-----------|-----------|------------|\n";
+  for (const s of velocity.sprints) {
+    out += `| ${s.sprintName} | ${s.committed} SP | ${s.completed} SP | ${s.carryOver} SP |\n`;
+  }
+  out += `\nTrend: ${velocity.trend} (slope: ${velocity.trendSlope.toFixed(2)} SP/sprint)\n`;
+  return out;
+}
+
+function formatEstimationAccuracy(completedSP: number, totalSP: number, velocityAvg: number): string {
+  const deliveryRate = totalSP > 0 ? Math.round((completedSP / totalSP) * 100) : 0;
+  let out = "\n## Estimation Accuracy\n\n";
+  out += `This sprint: ${completedSP}/${totalSP} = ${deliveryRate}% delivery rate\n`;
+  if (velocityAvg > 0) {
+    const diff = completedSP - velocityAvg;
+    const label = diff >= 0 ? "above" : "below";
+    out += `Compared to average velocity (${Math.round(velocityAvg)} SP): ${Math.abs(Math.round(diff))} SP ${label} average\n`;
+  }
+  return out;
+}
+
+function formatWorkloadDistribution(completed: SearchIssue[], spFieldId: string | undefined): string {
+  const assigneeMap = new Map<string, { sp: number; issues: number }>();
+  for (const issue of completed) {
+    const assignee = (issue.fields as Record<string, unknown>).assignee
+      ? (((issue.fields as Record<string, unknown>).assignee as { displayName?: string })?.displayName ?? "Unassigned")
+      : "Unassigned";
+    const sp = getStoryPoints(issue.fields, spFieldId);
+    const existing = assigneeMap.get(assignee) ?? { sp: 0, issues: 0 };
+    existing.sp += sp;
+    existing.issues += 1;
+    assigneeMap.set(assignee, existing);
+  }
+  if (assigneeMap.size <= 1) return "";
+
+  let out = "\n## Workload Distribution\n\n";
+  out += "| Assignee | Completed SP | Issues |\n";
+  out += "|----------|-------------|--------|\n";
+  const entries = [...assigneeMap.entries()];
+  const spValues = entries.map(([, d]) => d.sp);
+  const mean = spValues.reduce((a, b) => a + b, 0) / spValues.length;
+
+  for (const [name, data] of entries) {
+    out += `| ${name} | ${data.sp} | ${data.issues} |\n`;
+  }
+  const imbalanced = entries.some(([, d]) => mean > 0 && (d.sp > mean * 2 || d.sp < mean * 0.5));
+  out += `\nBalance: ${imbalanced ? "imbalanced" : "even"}\n`;
+  return out;
+}
+
 // ── Main handler ──
 
 /** Handle the 'retro' action (comprehensive retrospective data pack). */
@@ -313,10 +370,13 @@ export async function handleRetroAction(
   const out =
     formatHeader(sprint) +
     formatHealthSection(health, velocity, completionRate, completedSP, carryOver.length, bugRatio) +
+    formatVelocityTrend(velocity) +
+    formatEstimationAccuracy(completedSP, totalSP, velocity.average) +
     formatCycleTimeSection(cycleData) +
     formatSummarySection(issues.length, completed.length, carryOver.length, totalSP, completedSP, completionRate) +
     formatCompletedByType(completedByType) +
     formatCarryOver(carryOver) +
+    formatWorkloadDistribution(completed, spFieldId) +
     formatIssueBreakdown(issues) +
     formatScopeCreep(issues, sprint.startDate) +
     formatTimeInStatus(completed, cycleData);
