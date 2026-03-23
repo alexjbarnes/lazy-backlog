@@ -290,7 +290,7 @@ describe("registerInsightsTool", () => {
       const insights = getTool("insights");
       const result = await insights({ action: "epic-progress", epicKey: "BP-999" });
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("Epic not found");
+      expect(result.content?.[0]?.text).toContain("Epic not found");
 
       epicSpy.mockRestore();
     });
