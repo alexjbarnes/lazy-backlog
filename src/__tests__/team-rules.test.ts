@@ -1223,6 +1223,73 @@ describe("formatTeamStyleGuide", () => {
     expect(result).toContain("To Do");
     expect(result).toContain("Story 60%");
   });
+
+  it("gracefully handles corrupted JSON in rule values", () => {
+    const rules: TeamRule[] = [
+      {
+        category: "description_structure",
+        rule_key: "section_headings/Story",
+        issue_type: "Story",
+        rule_value: "NOT_VALID_JSON{{{",
+        confidence: 0.9,
+        sample_size: 50,
+      },
+      {
+        category: "naming_convention",
+        rule_key: "first_verb/Story",
+        issue_type: "Story",
+        rule_value: "BROKEN",
+        confidence: 0.8,
+        sample_size: 40,
+      },
+      {
+        category: "naming_convention",
+        rule_key: "examples/Task",
+        issue_type: "Task",
+        rule_value: "{invalid",
+        confidence: 0.7,
+        sample_size: 30,
+      },
+      {
+        category: "label_patterns",
+        rule_key: "top_labels",
+        issue_type: null,
+        rule_value: "corrupted[",
+        confidence: 0.6,
+        sample_size: 20,
+      },
+      {
+        category: "component_patterns",
+        rule_key: "top_components",
+        issue_type: null,
+        rule_value: "bad json",
+        confidence: 0.5,
+        sample_size: 15,
+      },
+      {
+        category: "workflow",
+        rule_key: "happy_path",
+        issue_type: null,
+        rule_value: "not an array",
+        confidence: 0.7,
+        sample_size: 25,
+      },
+      {
+        category: "sprint_composition",
+        rule_key: "type_mix",
+        issue_type: null,
+        rule_value: "{{bad",
+        confidence: 0.6,
+        sample_size: 20,
+      },
+    ];
+    // Should not throw — all corrupted JSON is handled gracefully
+    const result = formatTeamStyleGuide(rules);
+    expect(result).toContain("## Team Style Guide");
+    // Corrupted sections should be skipped, not crash
+    expect(result).not.toContain("NOT_VALID_JSON");
+    expect(result).not.toContain("BROKEN");
+  });
 });
 
 // ─── Statistical helpers (team-rules-utils) ──────────────────────────────

@@ -278,7 +278,7 @@ describe("registerInsightsTool", () => {
       expect(getText(result)).toContain("epicKey is required");
     });
 
-    it("propagates error when getEpicIssues throws", async () => {
+    it("returns error response when getEpicIssues throws", async () => {
       const { server, getTool } = createMockServer();
       registerInsightsTool(server, () => kb);
 
@@ -288,7 +288,9 @@ describe("registerInsightsTool", () => {
       ).mockImplementation(vi.fn().mockRejectedValue(new Error("Epic not found")));
 
       const insights = getTool("insights");
-      await expect(insights({ action: "epic-progress", epicKey: "BP-999" })).rejects.toThrow("Epic not found");
+      const result = await insights({ action: "epic-progress", epicKey: "BP-999" });
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0]?.text).toContain("Epic not found");
 
       epicSpy.mockRestore();
     });
@@ -656,7 +658,61 @@ describe("registerInsightsTool", () => {
 
       vi.spyOn(JiraClient.prototype, "listSprints").mockImplementation(() => Promise.resolve([]));
 
-      vi.spyOn(JiraClient.prototype, "getIssueChangelog").mockImplementation(() => Promise.resolve([]));
+      vi.spyOn(JiraClient.prototype, "getIssueChangelog").mockImplementation((issueKey: string) => {
+        const changelogs: Record<
+          string,
+          Array<{
+            id: string;
+            created: string;
+            author: { displayName: string; accountId: string };
+            items: Array<{ field: string; fromString: string | null; toString: string | null }>;
+          }>
+        > = {
+          "BP-30": [
+            {
+              id: "1",
+              created: "2026-02-16T10:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "To Do", toString: "In Progress" }],
+            },
+            {
+              id: "2",
+              created: "2026-02-20T10:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "In Progress", toString: "Done" }],
+            },
+          ],
+          "BP-31": [
+            {
+              id: "3",
+              created: "2026-02-16T12:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "To Do", toString: "In Progress" }],
+            },
+            {
+              id: "4",
+              created: "2026-02-18T10:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "In Progress", toString: "Done" }],
+            },
+          ],
+          "BP-32": [
+            {
+              id: "5",
+              created: "2026-02-17T10:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "To Do", toString: "In Progress" }],
+            },
+            {
+              id: "6",
+              created: "2026-02-25T10:00:00Z",
+              author: { displayName: "dev", accountId: "dev-1" },
+              items: [{ field: "status", fromString: "In Progress", toString: "Done" }],
+            },
+          ],
+        };
+        return Promise.resolve(changelogs[issueKey] ?? []);
+      });
 
       const insights = getTool("insights");
       const result = await insights({ action: "retro", sprintId: "16" });

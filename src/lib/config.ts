@@ -49,7 +49,8 @@ function parseStoredConfig(raw: string | undefined) {
   if (!raw) return {};
   try {
     return StoredConfigSchema.parse(JSON.parse(raw));
-  } catch {
+  } catch (err) {
+    console.error("Failed to parse stored config:", err instanceof Error ? err.message : String(err));
     return {};
   }
 }

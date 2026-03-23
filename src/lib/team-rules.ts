@@ -20,6 +20,15 @@ export * from "./team-rules-utils.js";
 
 // ─── Section formatting helpers ─────────────────────────────────────────────────
 
+/** Safe JSON.parse that returns null on failure instead of throwing. */
+function safeParseJson<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
 function ruleSuffix(r: TeamRule): string {
   return r.sample_size === 0 ? " *(default)*" : "";
 }
@@ -33,8 +42,8 @@ function formatDescriptionSection(descRules: TeamRule[]): string[] {
     const suffix = ruleSuffix(r);
 
     if (r.rule_key.startsWith("section_headings/")) {
-      const headings: string[] = JSON.parse(r.rule_value);
-      if (headings.length > 0) {
+      const headings = safeParseJson<string[]>(r.rule_value);
+      if (Array.isArray(headings) && headings.length > 0) {
         lines.push(`**${typeLabel}** — expected sections:${suffix}`);
         for (let i = 0; i < headings.length; i++) {
           lines.push(`${i + 1}. **${headings[i]}**`);
@@ -62,14 +71,14 @@ function formatNamingRule(r: TeamRule, lines: string[]): void {
   } else if (r.rule_key.startsWith("avg_words/")) {
     lines.push(`- **${typeLabel}**: avg ${r.rule_value} words${suffix}`);
   } else if (r.rule_key.startsWith("first_verb/")) {
-    const verbs: { verb: string; percentage: string }[] = JSON.parse(r.rule_value);
-    if (verbs.length > 0) {
+    const verbs = safeParseJson<{ verb: string; percentage: string }[]>(r.rule_value);
+    if (Array.isArray(verbs) && verbs.length > 0) {
       const verbStr = verbs.map((v) => `${v.verb} (${v.percentage})`).join(", ");
       lines.push(`- **${typeLabel}** top verbs: ${verbStr}${suffix}`);
     }
   } else if (r.rule_key.startsWith("examples/")) {
-    const examples: string[] = JSON.parse(r.rule_value);
-    if (examples.length > 0) {
+    const examples = safeParseJson<string[]>(r.rule_value);
+    if (Array.isArray(examples) && examples.length > 0) {
       lines.push(`- **${typeLabel}** examples:`);
       for (const ex of examples) {
         lines.push(`  - "${ex}"`);
@@ -112,8 +121,8 @@ function formatLabelsSection(labelRules: TeamRule[]): string[] {
   for (const r of labelRules) {
     const suffix = ruleSuffix(r);
     if (r.rule_key === "top_labels") {
-      const labels: { label: string; percentage: string }[] = JSON.parse(r.rule_value);
-      if (labels.length > 0) {
+      const labels = safeParseJson<{ label: string; percentage: string }[]>(r.rule_value);
+      if (Array.isArray(labels) && labels.length > 0) {
         const labelStr = labels.map((l) => `${l.label} (${l.percentage})`).join(", ");
         lines.push(`Top labels: ${labelStr}${suffix}`);
       }
@@ -133,8 +142,8 @@ function formatComponentsSection(compRules: TeamRule[]): string[] {
   for (const r of compRules) {
     const suffix = ruleSuffix(r);
     if (r.rule_key === "top_components") {
-      const comps: { component: string; percentage: string }[] = JSON.parse(r.rule_value);
-      if (comps.length > 0) {
+      const comps = safeParseJson<{ component: string; percentage: string }[]>(r.rule_value);
+      if (Array.isArray(comps) && comps.length > 0) {
         const compStr = comps.map((c) => `${c.component} (${c.percentage})`).join(", ");
         lines.push(`Top components: ${compStr}${suffix}`);
       }
@@ -152,7 +161,8 @@ function formatWorkflowSection(wfRules: TeamRule[]): string[] {
   for (const r of wfRules) {
     const suffix = ruleSuffix(r);
     if (r.rule_key === "happy_path") {
-      const path: string[] = JSON.parse(r.rule_value);
+      const path = safeParseJson<string[]>(r.rule_value);
+      if (!Array.isArray(path)) continue;
       lines.push(`Happy path: ${path.join(" → ")}${suffix}`);
     } else if (r.rule_key === "bottleneck") {
       lines.push(`Bottleneck status: **${r.rule_value}**${suffix}`);
@@ -169,7 +179,8 @@ function formatSprintSection(sprintRules: TeamRule[]): string[] {
 
   for (const r of sprintRules) {
     if (r.rule_key === "type_mix") {
-      const mix: Record<string, string> = JSON.parse(r.rule_value);
+      const mix = safeParseJson<Record<string, string>>(r.rule_value);
+      if (!mix) continue;
       const mixStr = Object.entries(mix)
         .map(([t, p]) => `${t} ${p}`)
         .join(", ");
