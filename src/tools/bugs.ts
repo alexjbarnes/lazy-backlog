@@ -117,8 +117,12 @@ export function registerBugsTool(server: McpServer, getKb: () => KnowledgeBase) 
     async (params) => {
       const kb = getKb();
 
-      if (params.action === "triage") {
-        return handleTriage(params, kb);
+      try {
+        if (params.action === "triage") {
+          return await handleTriage(params, kb);
+        }
+      } catch (err: unknown) {
+        return errorResponse(`Bug triage failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       return errorResponse(`Unknown action: ${params.action}`);

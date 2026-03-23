@@ -126,142 +126,148 @@ function handleTeamProfile(kb: KnowledgeBase): ToolResponse {
 async function handleEpicProgress(params: { epicKey?: string }, kb: KnowledgeBase): Promise<ToolResponse> {
   if (!params.epicKey) return errorResponse("epicKey is required for 'epic-progress' action.");
 
-  const { jira, config } = buildJiraClient(kb);
-  const issues = await jira.getEpicIssues(params.epicKey);
-  const spField = jira.storyPointsFieldId;
-
-  let doneCount = 0;
-  let inProgressCount = 0;
-  let todoCount = 0;
-  let totalPoints = 0;
-  let completedPoints = 0;
-  const remaining: Array<{ key: string; summary: string; status: string }> = [];
-
-  for (const issue of issues) {
-    const f = issue.fields as Record<string, unknown>;
-    const statusName = issue.fields.status?.name ?? "Unknown";
-    const cat = (issue.fields.status?.statusCategory?.name ?? "new").toLowerCase();
-    const sp =
-      (spField ? (f[spField] as number | undefined) : undefined) ??
-      (f.story_points as number | undefined) ??
-      (f.customfield_10016 as number | undefined) ??
-      0;
-
-    if (cat === "done") {
-      doneCount++;
-      completedPoints += sp;
-    } else if (cat === "indeterminate" || cat === "in progress") {
-      inProgressCount++;
-      remaining.push({ key: issue.key, summary: issue.fields.summary, status: statusName });
-    } else {
-      todoCount++;
-      remaining.push({ key: issue.key, summary: issue.fields.summary, status: statusName });
-    }
-    totalPoints += sp;
-  }
-
-  const total = issues.length;
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-  const remainingPoints = totalPoints - completedPoints;
-
-  let out = `# Epic Progress: ${params.epicKey}\n\n`;
-  out += `**Total Issues:** ${total} | **Done:** ${doneCount} | **In Progress:** ${inProgressCount} | **To Do:** ${todoCount}\n`;
-  out += `**Story Points:** ${totalPoints} total, ${completedPoints} completed, ${remainingPoints} remaining\n`;
-  out += `**Completion:** ${pct}%\n`;
-
-  if (remaining.length > 0) {
-    out += `\n## Remaining Issues (${remaining.length})\n`;
-    for (const r of remaining) {
-      out += `- ${r.key} (${r.status}): ${r.summary}\n`;
-    }
-  }
-
-  // Forecast based on velocity
-  if (remainingPoints > 0) {
-    const boardId = config.jiraBoardId ?? "";
-    if (boardId) {
-      try {
-        const sprintData = await fetchSprintData(jira, boardId, 5);
-        if (sprintData.length > 0) {
-          const velocity = computeVelocity(sprintData);
-          if (velocity.average > 0) {
-            const sprintsRemaining = Math.ceil(remainingPoints / velocity.average);
-            const weeksRemaining = sprintsRemaining * 2;
-            const estDate = new Date();
-            estDate.setDate(estDate.getDate() + weeksRemaining * 7);
-            const dateStr = estDate.toISOString().slice(0, 10);
-
-            out += `\n## Forecast\n`;
-            out += `**At current velocity (~${Math.round(velocity.average)} SP/sprint), estimated completion in ${sprintsRemaining} sprint${sprintsRemaining === 1 ? "" : "s"} (~${dateStr})**\n`;
-
-            const stddev = Math.sqrt(
-              velocity.sprints.reduce((sum, s) => sum + (s.completed - velocity.average) ** 2, 0) /
-                velocity.sprints.length,
-            );
-            if (velocity.trendSlope < -1 || stddev > velocity.average * 0.3) {
-              out += "\n> Warning: High uncertainty -- velocity is unstable\n";
-            }
-          }
-        }
-      } catch {
-        // Velocity data unavailable — skip forecast
-      }
-    }
-  }
-
-  // Blocker chain detection: check first 10 non-done issues for blocking links
   try {
-    const epicKeys = new Set(issues.map((i) => i.key));
-    const blockers: Array<{ blocker: string; blocked: string[]; blockedSP: number }> = [];
-    const toCheck = remaining.slice(0, 10);
+    const { jira, config } = buildJiraClient(kb);
+    const issues = await jira.getEpicIssues(params.epicKey);
+    const spField = jira.storyPointsFieldId;
 
-    for (const r of toCheck) {
-      try {
-        const links = await jira.getIssueLinks(r.key);
-        const blockedKeys = links
-          .filter((l) => l.direction === "outward" && /block/i.test(l.type) && epicKeys.has(l.linkedIssue.key))
-          .map((l) => l.linkedIssue.key);
+    let doneCount = 0;
+    let inProgressCount = 0;
+    let todoCount = 0;
+    let totalPoints = 0;
+    let completedPoints = 0;
+    const remaining: Array<{ key: string; summary: string; status: string }> = [];
 
-        if (blockedKeys.length > 0) {
-          let blockedSP = 0;
-          for (const bk of blockedKeys) {
-            const blocked = issues.find((i) => i.key === bk);
-            if (blocked) {
-              const f = blocked.fields as Record<string, unknown>;
-              blockedSP +=
-                (spField ? (f[spField] as number | undefined) : undefined) ??
-                (f.story_points as number | undefined) ??
-                (f.customfield_10016 as number | undefined) ??
-                0;
+    for (const issue of issues) {
+      const f = issue.fields as Record<string, unknown>;
+      const statusName = issue.fields.status?.name ?? "Unknown";
+      const cat = (issue.fields.status?.statusCategory?.name ?? "new").toLowerCase();
+      const sp =
+        (spField ? (f[spField] as number | undefined) : undefined) ??
+        (f.story_points as number | undefined) ??
+        (f.customfield_10016 as number | undefined) ??
+        0;
+
+      if (cat === "done") {
+        doneCount++;
+        completedPoints += sp;
+      } else if (cat === "indeterminate" || cat === "in progress") {
+        inProgressCount++;
+        remaining.push({ key: issue.key, summary: issue.fields.summary, status: statusName });
+      } else {
+        todoCount++;
+        remaining.push({ key: issue.key, summary: issue.fields.summary, status: statusName });
+      }
+      totalPoints += sp;
+    }
+
+    const total = issues.length;
+    const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+    const remainingPoints = totalPoints - completedPoints;
+
+    let out = `# Epic Progress: ${params.epicKey}\n\n`;
+    out += `**Total Issues:** ${total} | **Done:** ${doneCount} | **In Progress:** ${inProgressCount} | **To Do:** ${todoCount}\n`;
+    out += `**Story Points:** ${totalPoints} total, ${completedPoints} completed, ${remainingPoints} remaining\n`;
+    out += `**Completion:** ${pct}%\n`;
+
+    if (remaining.length > 0) {
+      out += `\n## Remaining Issues (${remaining.length})\n`;
+      for (const r of remaining) {
+        out += `- ${r.key} (${r.status}): ${r.summary}\n`;
+      }
+    }
+
+    // Forecast based on velocity
+    if (remainingPoints > 0) {
+      const boardId = config.jiraBoardId ?? "";
+      if (boardId) {
+        try {
+          const sprintData = await fetchSprintData(jira, boardId, 5);
+          if (sprintData.length > 0) {
+            const velocity = computeVelocity(sprintData);
+            if (velocity.average > 0) {
+              const sprintsRemaining = Math.ceil(remainingPoints / velocity.average);
+              const weeksRemaining = sprintsRemaining * 2;
+              const estDate = new Date();
+              estDate.setDate(estDate.getDate() + weeksRemaining * 7);
+              const dateStr = estDate.toISOString().slice(0, 10);
+
+              out += `\n## Forecast\n`;
+              out += `**At current velocity (~${Math.round(velocity.average)} SP/sprint), estimated completion in ${sprintsRemaining} sprint${sprintsRemaining === 1 ? "" : "s"} (~${dateStr})**\n`;
+
+              const stddev = Math.sqrt(
+                velocity.sprints.reduce((sum, s) => sum + (s.completed - velocity.average) ** 2, 0) /
+                  velocity.sprints.length,
+              );
+              if (velocity.trendSlope < -1 || stddev > velocity.average * 0.3) {
+                out += "\n> Warning: High uncertainty -- velocity is unstable\n";
+              }
             }
           }
-          blockers.push({ blocker: r.key, blocked: blockedKeys, blockedSP });
+        } catch {
+          // Velocity data unavailable — skip forecast
         }
-      } catch {
-        /* skip if links unavailable */
       }
     }
 
-    if (blockers.length > 0) {
-      out += `\n## Blockers\n`;
-      for (const b of blockers) {
-        const status = remaining.find((r) => r.key === b.blocker)?.status ?? "Unknown";
-        out += `- **${b.blocker}** (${status}) blocks ${b.blocked.join(", ")}`;
-        if (b.blockedSP > 0) out += ` (${b.blockedSP} SP)`;
-        out += `\n`;
+    // Blocker chain detection: check first 10 non-done issues for blocking links
+    try {
+      const epicKeys = new Set(issues.map((i) => i.key));
+      const blockers: Array<{ blocker: string; blocked: string[]; blockedSP: number }> = [];
+      const toCheck = remaining.slice(0, 10);
+
+      for (const r of toCheck) {
+        try {
+          const links = await jira.getIssueLinks(r.key);
+          const blockedKeys = links
+            .filter((l) => l.direction === "outward" && /block/i.test(l.type) && epicKeys.has(l.linkedIssue.key))
+            .map((l) => l.linkedIssue.key);
+
+          if (blockedKeys.length > 0) {
+            let blockedSP = 0;
+            for (const bk of blockedKeys) {
+              const blocked = issues.find((i) => i.key === bk);
+              if (blocked) {
+                const f = blocked.fields as Record<string, unknown>;
+                blockedSP +=
+                  (spField ? (f[spField] as number | undefined) : undefined) ??
+                  (f.story_points as number | undefined) ??
+                  (f.customfield_10016 as number | undefined) ??
+                  0;
+              }
+            }
+            blockers.push({ blocker: r.key, blocked: blockedKeys, blockedSP });
+          }
+        } catch {
+          /* skip if links unavailable */
+        }
       }
-      const totalBlockedSP = blockers.reduce((s, b) => s + b.blockedSP, 0);
-      if (totalBlockedSP > 0) {
-        out += `\nResolving blockers unblocks **${totalBlockedSP} SP** on the critical path.\n`;
+
+      if (blockers.length > 0) {
+        out += `\n## Blockers\n`;
+        for (const b of blockers) {
+          const status = remaining.find((r) => r.key === b.blocker)?.status ?? "Unknown";
+          out += `- **${b.blocker}** (${status}) blocks ${b.blocked.join(", ")}`;
+          if (b.blockedSP > 0) out += ` (${b.blockedSP} SP)`;
+          out += `\n`;
+        }
+        const totalBlockedSP = blockers.reduce((s, b) => s + b.blockedSP, 0);
+        if (totalBlockedSP > 0) {
+          out += `\nResolving blockers unblocks **${totalBlockedSP} SP** on the critical path.\n`;
+        }
       }
+    } catch {
+      /* graceful: skip blocker detection if links unavailable */
     }
-  } catch {
-    /* graceful: skip blocker detection if links unavailable */
+
+    const behindSchedule = remainingPoints > completedPoints;
+    const suggestions = buildSuggestions("insights", "epic-progress", { behindSchedule });
+    return textResponse(out + suggestions);
+  } catch (err: unknown) {
+    return errorResponse(
+      `Failed to get epic progress for ${params.epicKey}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-
-  const behindSchedule = remainingPoints > completedPoints;
-  const suggestions = buildSuggestions("insights", "epic-progress", { behindSchedule });
-  return textResponse(out + suggestions);
 }
 
 // ── Tool Registration ────────────────────────────────────────────────────────
@@ -302,9 +308,13 @@ export function registerInsightsTool(server: McpServer, getKb: () => KnowledgeBa
           return handlePlanAction(params, kb);
 
         case "retro": {
-          const { jira, config } = buildJiraClient(kb);
-          const boardId = config.jiraBoardId ?? "";
-          return handleRetroAction(params, jira, boardId, jira.storyPointsFieldId);
+          try {
+            const { jira, config } = buildJiraClient(kb);
+            const boardId = config.jiraBoardId ?? "";
+            return await handleRetroAction(params, jira, boardId, jira.storyPointsFieldId);
+          } catch (err: unknown) {
+            return errorResponse(`Retro failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     },

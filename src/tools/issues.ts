@@ -225,7 +225,7 @@ export function registerIssuesTool(server: McpServer, getKb: () => KnowledgeBase
     "issues",
     {
       description:
-        "Jira issue CRUD and planning. IMPORTANT: 'create' ALWAYS returns a preview first. You MUST show the preview to the user and wait for their explicit approval before calling again with confirmed=true. NEVER set confirmed=true without user approval. Actions: 'get' fetch one or many issue details (pass issueKey for single, issueKeys for bulk). 'create' create one issue, bulk-create multiple (pass tickets array), or decompose an epic (pass epicKey without summary) — all return preview first. 'update' modify fields, transition status, assign, or link — includes enrichment gap suggestions. 'search' query via JQL (auto-scoped to configured board). For epic progress, velocity, retros, and team profile use the 'insights' tool. For bug-specific workflows (find, assess, triage) use the 'bugs' tool. For backlog listing and ranking use the 'backlog' tool. For sprint operations use the 'sprints' tool.",
+        "Jira issue CRUD. 'create' returns preview first — set confirmed=true only after user approval. Pass tickets array for bulk, epicKey without summary to decompose. Actions: 'get' fetch issue(s). 'create' single/bulk/decompose. 'update' fields/status/assignee/links. 'search' JQL query. Use 'insights' for analytics, 'bugs' for triage, 'backlog' for ranking, 'sprints' for sprint ops.",
       inputSchema: z.object({
         action: z.enum(["get", "create", "update", "search"]),
         // Shared identifiers

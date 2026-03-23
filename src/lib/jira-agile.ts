@@ -336,8 +336,8 @@ export async function getIssueLinks(
         direction: "inward",
         linkedIssue: {
           key: link.inwardIssue.key,
-          summary: link.inwardIssue.fields.summary,
-          status: link.inwardIssue.fields.status.name,
+          summary: link.inwardIssue.fields?.summary ?? "",
+          status: link.inwardIssue.fields?.status?.name ?? "Unknown",
         },
       });
     }
@@ -347,8 +347,8 @@ export async function getIssueLinks(
         direction: "outward",
         linkedIssue: {
           key: link.outwardIssue.key,
-          summary: link.outwardIssue.fields.summary,
-          status: link.outwardIssue.fields.status.name,
+          summary: link.outwardIssue.fields?.summary ?? "",
+          status: link.outwardIssue.fields?.status?.name ?? "Unknown",
         },
       });
     }

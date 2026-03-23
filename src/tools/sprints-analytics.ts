@@ -52,29 +52,33 @@ export async function handleVelocityAction(
 ) {
   if (!boardId) return errorResponse("No board ID configured. Set JIRA_BOARD_ID or run configure.");
 
-  const sprintCount = params.sprintCount ?? 5;
-  const sprintData = await fetchSprintData(jira, boardId, sprintCount);
-  if (sprintData.length === 0) {
-    return textResponse("# Velocity\n\nNo closed sprints found.");
+  try {
+    const sprintCount = params.sprintCount ?? 5;
+    const sprintData = await fetchSprintData(jira, boardId, sprintCount);
+    if (sprintData.length === 0) {
+      return textResponse("# Velocity\n\nNo closed sprints found.");
+    }
+    const velocity = computeVelocity(sprintData);
+
+    const metrics = params.trendMetrics ?? ["velocity"];
+    const showBugRate = metrics.includes("bugRate");
+    const showScopeChange = metrics.includes("scopeChange");
+
+    let out = `# Velocity Report (last ${sprintData.length} sprints)\n\n`;
+    out += buildVelocityHeader(showBugRate, showScopeChange);
+
+    for (let idx = 0; idx < sprintData.length; idx++) {
+      const s = sprintData[idx];
+      const v = velocity.sprints[idx];
+      if (!s || !v) continue;
+      out += `${buildVelocityRow(s, v, showBugRate, showScopeChange)}\n`;
+    }
+    out += `\n**Average velocity:** ${velocity.average} pts\n`;
+    out += `**Trend:** ${velocity.trend} (slope: ${velocity.trendSlope})\n`;
+    return textResponse(out);
+  } catch (err: unknown) {
+    return errorResponse(`Velocity failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const velocity = computeVelocity(sprintData);
-
-  const metrics = params.trendMetrics ?? ["velocity"];
-  const showBugRate = metrics.includes("bugRate");
-  const showScopeChange = metrics.includes("scopeChange");
-
-  let out = `# Velocity Report (last ${sprintData.length} sprints)\n\n`;
-  out += buildVelocityHeader(showBugRate, showScopeChange);
-
-  for (let idx = 0; idx < sprintData.length; idx++) {
-    const s = sprintData[idx];
-    const v = velocity.sprints[idx];
-    if (!s || !v) continue;
-    out += `${buildVelocityRow(s, v, showBugRate, showScopeChange)}\n`;
-  }
-  out += `\n**Average velocity:** ${velocity.average} pts\n`;
-  out += `**Trend:** ${velocity.trend} (slope: ${velocity.trendSlope})\n`;
-  return textResponse(out);
 }
 
 /* ------------------------------------------------------------------ */

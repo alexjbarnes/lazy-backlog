@@ -3,6 +3,7 @@
  * team assignment, statuses, and sample tickets from Jira REST API.
  */
 
+import fs from "node:fs";
 import { fetchWithRetry } from "./http-utils.js";
 import { authHeaders, validateSiteUrl } from "./jira-auth.js";
 import type {
@@ -211,7 +212,7 @@ async function discoverStatusesAndSamples(
 export function loadSchema(schemaPath?: string): JiraSchema | null {
   if (!schemaPath) return null;
   try {
-    return JSON.parse(require("node:fs").readFileSync(schemaPath, "utf-8")) as JiraSchema;
+    return JSON.parse(fs.readFileSync(schemaPath, "utf-8")) as JiraSchema;
   } catch {
     return null;
   }

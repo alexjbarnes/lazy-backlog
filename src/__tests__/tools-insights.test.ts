@@ -278,7 +278,7 @@ describe("registerInsightsTool", () => {
       expect(getText(result)).toContain("epicKey is required");
     });
 
-    it("propagates error when getEpicIssues throws", async () => {
+    it("returns error response when getEpicIssues throws", async () => {
       const { server, getTool } = createMockServer();
       registerInsightsTool(server, () => kb);
 
@@ -288,7 +288,9 @@ describe("registerInsightsTool", () => {
       ).mockImplementation(vi.fn().mockRejectedValue(new Error("Epic not found")));
 
       const insights = getTool("insights");
-      await expect(insights({ action: "epic-progress", epicKey: "BP-999" })).rejects.toThrow("Epic not found");
+      const result = await insights({ action: "epic-progress", epicKey: "BP-999" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Epic not found");
 
       epicSpy.mockRestore();
     });

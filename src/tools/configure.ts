@@ -329,7 +329,7 @@ export function registerConfigureTool(server: McpServer, getKb: () => KnowledgeB
     "configure",
     {
       description:
-        "Project configuration. Actions: 'setup' — REQUIRED before using any other tool. Needs projectKey, boardId, and spaceKeys (Confluence). If any are missing, ask the user for ALL THREE before calling. Discovers Jira schema, spiders Confluence pages for context, and learns team conventions from existing tickets. 'set' — save individual settings. 'get' — view current config and setup status. After setup, use 'issues' for issue CRUD, 'bugs' for bug workflows, 'backlog' for backlog management, 'sprints' for sprint ops, 'insights' for team intelligence + velocity + retros + epic progress, 'knowledge' for KB search, 'confluence' for wiki crawling.",
+        "Project configuration. Actions: 'setup' — REQUIRED first. Needs projectKey, boardId, spaceKeys. Discovers Jira schema, spiders Confluence, learns team conventions. 'set' — save settings. 'get' — view config and status. After setup, use 'issues', 'bugs', 'backlog', 'sprints', 'insights', 'knowledge', 'confluence'.",
       inputSchema: z.object({
         action: z.enum(["setup", "set", "get"]),
         jiraProjectKey: z.string().optional().describe("[set] Jira project key, e.g. 'BP'"),
